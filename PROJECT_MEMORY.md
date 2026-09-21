@@ -290,6 +290,26 @@ observational-memory/
   github.com:22 рвётся после KEX — DPI; работает через ssh.github.com:443, см.
   ~/.ssh/config). Пакет переименован в @stelmakhdigital/observational-memory,
   URL установки в README/доках обновлён.
+- 2025-09: **разведка рынка памяти для агентов** (GitHub, 2026-09): mem0 65.8k★ (новый
+  алгоритм: single-pass ADD-only extraction, entity linking, temporal reasoning,
+  бенчмарки LoCoMo 92.5 / LongMemEval 94.4, open-source eval), Graphiti/Zep 31k★
+  (bi-temporal граф: факты с valid/invalid windows, invalidation не delete, hybrid
+  search), cognee 30.9k★ (ECL pipeline), supermemory 30.8k★ TS/MIT (auto-forget
+  устаревших фактов, contradiction resolution, 95% Recall@15 за ~720 токенов),
+  Letta 24.8k★ (memory blocks + sleep-time agents — фоновая консолидация памяти,
+  arXiv 2504.13171), basic-memory 4k★ AGPL (markdown+sqlite, MCP, hybrid search —
+  архитектурно ближе всех к нам). Поля, отсутствующие у OM и присутствующие у лидеров:
+  (1) би-темпоральность/invalidation фактов; (2) явная политика конфликтов
+  (supersede, не overwrite); (3) sleep-time «reflector»-пасс; (4) retrieval по
+  запросу посреди диалога (у нас — только injection при компакции); (5) eval-
+  харнес (LongMemEval/LoCoMo — индустриальный стандарт); (6) защита от memory
+  poisoning (prompt injection → долговременная память). Наши редкие козыри:
+  детерминированный model-free compaction block, append-only branch-local ledger +
+  watermark (аудит, /tree), cost tracking фоновых LLM, scoped workers, local-first
+  без БД/сервисов. Приоритеты для v0.4+: P0 supersede/asOf-метаданные + /om:recall
+  (детерминированный поиск по темам); P1 anti-poisoning guard, self-eval harness,
+  reflector-роль; P2 project-level shared memory, seed-from, temporal queries.
+  (Подробнее — в отчёте от 22.09; развитие на паузе по решению пользователя.)
 - 2025-09: **push выполнен**: main (3b2d1cb) + тег v0.1.0 → github.com:stelmakhdigital/observational-memory.
   Корень проблемы SSH: права на ~/.ssh/id_ed25519 были 0664 (chmod 600) + агент SSH держит
   ключ в locked-состоянии. Обход зашит в ~/.ssh/config: Host github.com →
