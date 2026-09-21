@@ -28,13 +28,13 @@
 - [x] Ядро: types + config (defaults, merge, invariants)
 - [x] Ядро: tokens (token estimation) + chunker (token-bounded slices)
 - [x] Ядро: ledger (append-only pool, watermarks/coversUpToId, projection, deterministic render)
-- [ ] Ядро: orchestrator (observer clock, consolidator clock, compaction, concurrency, idle-wait)
+- [x] Ядро: orchestrator (observer clock, consolidator clock, compaction, concurrency, idle-wait) — Sprint 6
 - [x] Ядро: memory-store (topic files, INDEX.md, JOURNEY.md, fork-seed)
 - [x] Ядро: gap-markers (v1: генерация меток временных пауз, якоря для observer'а)
-- [ ] Ядро: prompts (observer / consolidator) + cost accounting
-- [ ] Adapter pi: входные события → оркестратор; ledger через pi.appendEntry
-- [ ] Adapter pi: ModelRunner через headless subprocess pi
-- [ ] Adapter pi: команды /om*, status UI, конфиг settings.json
+- [x] Ядро: prompts (observer / consolidator) + cost accounting — Sprint 5
+- [x] Adapter pi: входные события → оркестратор; ledger через pi.appendEntry — Sprint 7
+- [x] Adapter pi: ModelRunner через headless subprocess pi — Sprint 7
+- [x] Adapter pi: команды /om*, status UI, конфиг settings.json — Sprint 7
 
 ## 4. Реализация (Implementation)
 - [x] Core: config + types + tokens + chunker (+ unit-тесты)
@@ -73,4 +73,4 @@
 | 2025-09 | 0b86968 | Sprint 5: prompts (observer/consolidator) + worker-output parser + тесты (77 passed) |
 | 2025-09 | 95dbb6b | Sprint 6: orchestrator + интеграционные тесты пайплайна (88 passed) |
 | 2025-09 | d2d8f4a | Sprint 7: adapter pi (config/history/ledger/runner/index) + unit-тесты (111 passed) |
-| 2025-09 | —       | Sprint 8: README + package.json + smoke-тест точки входа (115 passed) |
+| 2025-09 | 35a7667 | Sprint 8: README + package.json + smoke-тест точки входа (115 passed) |
