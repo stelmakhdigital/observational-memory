@@ -310,6 +310,37 @@ observational-memory/
   (детерминированный поиск по темам); P1 anti-poisoning guard, self-eval harness,
   reflector-роль; P2 project-level shared memory, seed-from, temporal queries.
   (Подробнее — в отчёте от 22.09; развитие на паузе по решению пользователя.)
+- 2025-09: **разведка НИШИ observational memory** (концепция, а не память в целом).
+  Канон: **Mastra OM** (@mastra/memory≥1.1, mastra 28.2k★). Observer (порог 30k
+  токенов, tokenx-оценка) → dense append-only observation log, заменяющий историю
+  (стабильный контекст — дружелюбие к prompt-cache); Reflector — реорг/склейка/
+  уплотнение; early activation: activateAfterIdle ('auto'/'5m'...),
+  activateOnProviderChange, bufferOnIdle (off), bufferTokens (async pre-buffering,
+  мгновенный swap); temporal gap markers (off, пауза ≥10 мин); extractors: with-schema
+  (follow-up structured call) и schema-less (inline); **includePreviousExtraction
+  (default true — инкрементное обновление значений)**; встроенные extractors: current
+  task / suggested response / thread title; stream-события data-om-*-end
+  (extractedValues/extractionFailures); обязательный storage adapter.
+  Экосистема адаптеров ниши (2026-02..09, зрелость низкая; лидер вне Mastra —
+  total-recall 273★): nik1t7n/pi-observational-memory-extension (4★; Actor/Observer/
+  Reflector, priority-метки 🔴🟡🟢✅, vector/BOW retrieval (local offline — default,
+  Gemini — opt), om_recall-тул (сырая история из scrollable index), attachment gates,
+  pre-buffering 20% порога, stale-lock recovery, TUI, adaptive thresholds, пороги
+  30k/40k); SentioLabs/observational-memory (Go CLI, Codex-first, evidence-backed:
+  наблюдения с проверяемыми ссылками на источники, «evidence is data, not
+  instructions» — anti-poisoning, SQLite ledgers, memory ops без LLM/сети);
+  voladelta/omk (local-first kernel+CLI); c-daly/memory (Claude Code); total-recall и
+  clawback (OpenClaw); hermes-om ×2; opencode-om; amosblomqvist/pi-observational-
+  memory (наш референс) — 53★/28 forks. Выводы: (1) ниша горячая — концепция
+  распространяется на все harness'ы; (2) «стандарт фич» ниши, отсутствующих у OM:
+  recall-тул по сырой истории, приоритетные метки наблюдений, ranked/BOW-инжекция,
+  pre-buffering с мгновенным swap (у нас частично: early activation), provenance-
+  указатели на исходную историю, current-task-экстрактор, includePrevious для
+  экстракторов, crash-durability (locks/atomicity); (3) козыри OM в нише: branch-
+  local ledger + watermark (никто в нише branch-aware), cost tracking, scoped
+  workers, детерминированный model-free block, embedded core. Быстрые выигрыши
+  v0.4+: current-task extractor + priority labels + /om:recall + provenance +
+  includePrevious — выравнивание со стандартом ниши при низкой цене.
 - 2025-09: **push выполнен**: main (3b2d1cb) + тег v0.1.0 → github.com:stelmakhdigital/observational-memory.
   Корень проблемы SSH: права на ~/.ssh/id_ed25519 были 0664 (chmod 600) + агент SSH держит
   ключ в locked-состоянии. Обход зашит в ~/.ssh/config: Host github.com →
