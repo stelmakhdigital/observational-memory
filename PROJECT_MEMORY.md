@@ -297,3 +297,8 @@ observational-memory/
   `pi install git:github.com/stelmakhdigital/observational-memory@v0.1.0`.
   Тег v0.1.0 стоит на 806bc1f (до early activation); early activation + fork-seed-fix
   (3b2d1cb) пойдут в v0.2.0.
+- 2025-09: **v0.2.0** (тег 3982f98): early activation + fork-seed fix в релизе;
+  установка в pi переключена с локального пути на
+  `git:github.com/stelmakhdigital/observational-memory@v0.2.0` (settings.json,
+  pi поставит пакет при следующем старте). Локальная разработка теперь требует
+  `pi update --extensions` / сдвиг тега для прогона изменений.
