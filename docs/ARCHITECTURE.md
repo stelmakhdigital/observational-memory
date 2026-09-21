@@ -220,37 +220,45 @@ onAgentEnd (idle):
   `ctx.isIdle()`), `currentTokens` из `ctx.getContextUsage()`.
 - `PiLedgerStore`: `pi.appendEntry('om', {type, data})` — branch-local, переживает
   resume (решение §7.3 PROJECT_MEMORY). Чтение — из записей сессии.
-- `PiSubprocessRunner` (ModelRunner): headless `pi` subprocess
-  (`-e adapters/pi/worker.ts`, env `OM_WORKER=observer|consolidator`, prompt из
-  WorkerInput); IPC через результат-файл `.memory/<session>/.runs/<runId>.json`
-  (+ cost); бинарник: `piBinary` / `OM_PI_BIN` / PATH (решение §7.4).
-  Воркер-расширение имеет свои tools (read/write/edit/ls/grep) со scope на sessionDir
-  для consolidator'а; observer — один tool `commit_observations`.
-- `EventSink` → UI: status widget/footer (cost, пул), `/om:status`.
-- Compaction: `onCompactionBlock` → адаптер передаёт блок в компакцию
-  (ctx.compact / session_compact-механика pi — уточняется спайком S1).
+- `PiSubprocessRunner` (ModelRunner): headless `pi -p --mode json --model <pattern> 
+  --no-extensions -- <prompt>`; бинарник: `piBinary` / `OM_PI_BIN` (решение §7.4).
+  Выход — JSONL-события; `parsePiJsonl` извлекает финальный assistant-текст и
+  cost из `usage.cost.total`; таймаут (workerTimeoutMs) → резкий finish + SIGKILL.
+  Парсинг ответа — lenient-парсеры core (worker-output.ts).
+  **Ограничение v1:** воркеры работают с дефолтным набором тулов pi (консолидатору
+  нужен доступ к `.memory/<session>/`); scope-hardening (worker-расширение со
+  scoped tools, как в референсе) — v1.1.
+- `EventSink` → UI: `ctx.ui.setStatus('om', …)` (cost, пул), `ctx.ui.notify` (ошибки/статусы),
+  gap-markers → `pi.sendMessage({customType:'om', display:false})` (hidden context anchor).
+- Compaction (S1): `session_before_compact` → `{compaction: {summary: block.text,
+  firstKeptEntryId: <первая запись после tail boundary>, tokensBefore}}` — OM-блок
+  становится summary компакции (model-free). Триггер: onAgentEnd (порог контекста)
+  → `ctx.compact()`, а также ручные `/compact` и `om:compact`.
 
 ### 5.3 Команды и UI (FR-7)
 
 `/om [on|off]`, `/om:status`, `/om:compact`, `/om:consolidate` — через
-`pi.registerCommand`; конфиг — `observational-memory` в settings.json (FR-9).
+`pi.registerCommand` (реализованы в `index.ts`); конфиг — `observational-memory`
+в settings.json (FR-9).
 
-### 5.4 Спайки (R1/R5, сделать в начале Implementation)
+### 5.4 Спайки (выполнены в Sprint 7, подтверждено по .d.ts/докам pi 0.86.1)
 
-- S1: как OM-блок попадает в компакцию pi (какие события/ctx API).
-- S2: поведение `pi.appendEntry` при `/tree`/resume (branch-local подтверждение).
+- S1 (решено): OM-блок → `session_before_compact` возвращает `compaction.summary`
+  + `firstKeptEntryId` (tail boundary).
+- S2 (решено): `pi.appendEntry` — CustomEntry как дочка текущего leaf: branch-local,
+  не участвует в LLM-контексте, переживает resume — ledger-хранилище корректно.
 
 ## 6. Файловый лэйаут (цель)
 
 ```
 package.json            name: @arkalaust/observational-memory, exports ./core ./adapters/pi
 tsconfig.json  vitest.config.ts
-src/core/types.ts  config.ts  tokens.ts  chunker.ts  ids.ts  errors.ts  debug-log.ts
-src/core/ledger/{pool,progress,projection,render,serialize}.ts
+src/core/types.ts  config.ts  tokens.ts  chunker.ts  ids.ts  worker-output.ts
+src/core/ledger/{index,pool,progress,render,serialize}.ts
 src/core/memory-store.ts  gap-markers.ts  cost.ts
-src/core/prompts/{observer,consolidator}.ts  worker-output.ts (парсер)
+src/core/prompts/{observer,consolidator}.ts
 src/core/orchestrator.ts  index.ts (public API)
-src/adapters/pi/{index.ts,history.ts,ledger.ts,runner.ts,worker.ts,commands.ts,ui.ts,config.ts}
+src/adapters/pi/{index.ts,history.ts,ledger.ts,runner.ts,config.ts,types.ts}
 tests/unit/*  tests/integration/*  tests/fixtures/*
 docs/{REQUIREMENTS,ARCHITECTURE}.md  README.md
 ```
