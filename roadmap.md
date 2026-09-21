@@ -59,6 +59,7 @@
 ## 7. Эксплуатация / Обратная связь (Post-project)
 - [ ] Сбор обратной связи от использования в pi
 - [x] v1.1: worker scope-hardening (scoped tools, --no-builtin-tools, worker-расширение)
+- [x] Packaging: установка через Git (`pi install git:...`), pi-манифест, без npm-публикации
 - [ ] v2: extractors (Mastra-style), early activation, другие адаптеры
 
 ## Журнал коммитов
@@ -78,4 +79,5 @@
 | 2025-09 | d00407c | roadmap: синхронизация Design-секции со спринтами 6–8 |
 | 2025-09 | 7aba3b4 | Release review: мёртвый export убран, ARCHITECTURE синхронизирован с финальным layout |
 | 2025-09 | 9cbc621 | docs: отметка релиз-обзора, журнал коммитов |
-| 2025-09 | —       | v1.1: worker scope-hardening (scoped-tools, worker.ts, runner --no-builtin-tools, 130 passed) |
+| 2025-09 | 7d4728c | v1.1: worker scope-hardening (scoped-tools, worker.ts, runner --no-builtin-tools, 130 passed) |
+| 2025-09 | —       | Packaging для git-install: pi-манифест, keyword pi-package, typebox → peerDeps, packaging-тесты (134 passed) |

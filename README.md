@@ -47,14 +47,23 @@ npm test            # vitest (без LLM)
 
 ### Подключение к pi
 
-Расширение — это `src/adapters/pi/index.ts` (default export, принимает `ExtensionAPI`).
-Варианты:
+Установка **через Git** (pi-пакет, манифест `pi.extensions` в package.json — расширение
+подхватывается автоматически):
 
-1. **Локально (разработка):** в `~/.pi/agent/settings.json` или `.pi/settings.json`:
-   ```json
-   { "extensions": ["/абсолютный/путь/к/observational-memory/src/adapters/pi/index.ts"] }
-   ```
-2. **Как pi-пакет** (npm/git) — см. `docs/packages.md` в документации pi.
+```bash
+pi install git:github.com/arkalaust/observational-memory@v0.1.0   # тег
+pi install /абсолютный/путь/к/observational-memory               # локальный каталог
+pi -e /абсолютный/путь/к/observational-memory                    # один раз, без установки
+pi remove git:github.com/arkalaust/observational-memory          # удалить
+```
+
+pi клонирует репозиторий и запускает `npm install` в клоне (runtime-зависимостей нет;
+typebox — peerDependency, поставляется самим pi).
+
+Альтернатива (ручная, без установки пакета): в `~/.pi/agent/settings.json`:
+```json
+{ "extensions": ["/абсолютный/путь/к/observational-memory/src/adapters/pi/index.ts"] }
+```
 
 После установки доступны команды: `/om`, `/om:status`, `/om:compact`, `/om:consolidate`.
 
