@@ -110,6 +110,8 @@ export interface CompactionBlock {
   verbatimTail: string;
   /** Gap markers rendered at the head, if any. */
   gapMarkers: string;
+  /** Fully assembled block text (deterministic for given inputs). */
+  text: string;
   generatedAt: string;
 }
 

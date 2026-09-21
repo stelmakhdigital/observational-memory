@@ -210,4 +210,11 @@ observational-memory/
 - 2025-09: Sprint 2 выполнен: tokens (estimateTokens, быстрая эвристика без LLM) +
   MessageChunker (token-bounded slices по границам сообщений, watermark, overlap,
   re-observe при неизвестном watermark после /tree). Тестов: 26 passed.
-- Следующий шаг: Sprint 3 — ledger (pool/progress/projection/render/serialize) + тесты.
+- 2025-09: Sprint 3 выполнен: ledger — pool (fold, tombstones, oldestAbove), progress
+  (watermark = max coversUpToId, out-of-order safe, survives tombstones), render
+  (детерминированный model-free compaction block, cutoff selectBeforeTail — нет
+  двойного представления), serialize (versioned envelopes, null on corrupt).
+  Тестов: 45 passed. Важные решения: watermark — MESSAGE id; id наблюдений
+  lexicographically ordered (seq scoped to second, nextObsSeqAt).
+- Следующий шаг: Sprint 4 — memory-store (topic files, INDEX.md, JOURNEY.md, fork-seed)
+  + gap-markers + cost + тесты.

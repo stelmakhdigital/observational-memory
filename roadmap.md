@@ -27,7 +27,7 @@
 - [x] package.json, tsconfig, vitest, лэйаут каталогов (core/, adapters/pi/, tests/, docs/)
 - [x] Ядро: types + config (defaults, merge, invariants)
 - [x] Ядро: tokens (token estimation) + chunker (token-bounded slices)
-- [ ] Ядро: ledger (append-only pool, watermarks/coversUpToId, projection, deterministic render)
+- [x] Ядро: ledger (append-only pool, watermarks/coversUpToId, projection, deterministic render)
 - [ ] Ядро: orchestrator (observer clock, consolidator clock, compaction, concurrency, idle-wait)
 - [ ] Ядро: memory-store (topic files, INDEX.md, JOURNEY.md, fork-seed)
 - [ ] Ядро: gap-markers (v1: генерация меток временных пауз, якоря для observer'а)
@@ -38,7 +38,7 @@
 
 ## 4. Реализация (Implementation)
 - [x] Core: config + types + tokens + chunker (+ unit-тесты)
-- [ ] Core: ledger (+ unit-тесты)
+- [x] Core: ledger (+ unit-тесты)
 - [ ] Core: orchestrator (+ unit-тесты с mock-ModelRunner)
 - [ ] Core: memory-store (+ unit-тесты)
 - [ ] Core: gap-markers (+ unit-тесты)
@@ -67,4 +67,5 @@
 | 2025-09 | d3256cf | Discovery: спецификация требований (docs/REQUIREMENTS.md) — фаза закрыта |
 | 2025-09 | d225aee | Planning: архитектура (docs/ARCHITECTURE.md) |
 | 2025-09 | a4593cb | Sprint 1: skeleton пакета + core types/config/ids + unit-тесты (12 passed) |
-| 2025-09 | —       | Sprint 2: tokens + chunker (+ unit-тесты, 26 passed) |
+| 2025-09 | ca5532e | Sprint 2: tokens + chunker + unit-тесты (26 passed) |
+| 2025-09 | —       | Sprint 3: ledger (pool/progress/render/serialize) + unit-тесты (45 passed) |
