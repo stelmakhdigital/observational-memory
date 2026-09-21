@@ -90,4 +90,4 @@
 | 2025-09 | 48926e5 | docs: packaging (git-install) и extractors в PROJECT_MEMORY/roadmap |
 | 2025-09 | 806bc1f | Release v0.1.0: version bump 0.1.0 + тег v0.1.0 |
 | 2025-09 | 368854d | docs: ручной smoke в реальном pi пройден (48 obs, консолидации, экстракторы, OM-компакция); smoke-пороги из конфига убраны |
-| 2025-09 | —       | v2: early activation (model_select + idle) + fork-seed копирует extracted/ (155 passed) |
+| 2025-09 | 3b2d1cb | v2: early activation (model_select + idle) + fork-seed копирует extracted/ (155 passed); запушено: main + тег v0.1.0 → github.com:stelmakhdigital/observational-memory |

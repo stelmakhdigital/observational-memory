@@ -290,3 +290,10 @@ observational-memory/
   github.com:22 рвётся после KEX — DPI; работает через ssh.github.com:443, см.
   ~/.ssh/config). Пакет переименован в @stelmakhdigital/observational-memory,
   URL установки в README/доках обновлён.
+- 2025-09: **push выполнен**: main (3b2d1cb) + тег v0.1.0 → github.com:stelmakhdigital/observational-memory.
+  Корень проблемы SSH: права на ~/.ssh/id_ed25519 были 0664 (chmod 600) + агент SSH держит
+  ключ в locked-состоянии. Обход зашит в ~/.ssh/config: Host github.com →
+  ssh.github.com:443, IdentityFile + IdentitiesOnly (без агента). Установка в pi теперь:
+  `pi install git:github.com/stelmakhdigital/observational-memory@v0.1.0`.
+  Тег v0.1.0 стоит на 806bc1f (до early activation); early activation + fork-seed-fix
+  (3b2d1cb) пойдут в v0.2.0.
