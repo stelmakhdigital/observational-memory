@@ -53,7 +53,7 @@
 - [ ] Smoke: установка в pi, /om on, сессия → observations создаются, /om:status, компакция (ручной, в реальном pi)
 
 ## 6. Релиз (PMBOK: Closing + Release)
-- [ ] Финальный обзор кода, чистка
+- [x] Финальный обзор кода, чистка (7aba3b4: мёртвый export убран, ARCHITECTURE синхронизирован; 115 тестов зелёные)
 - [ ] Тег v0.1.0 (по согласованию)
 
 ## 7. Эксплуатация / Обратная связь (Post-project)
@@ -74,3 +74,5 @@
 | 2025-09 | 95dbb6b | Sprint 6: orchestrator + интеграционные тесты пайплайна (88 passed) |
 | 2025-09 | d2d8f4a | Sprint 7: adapter pi (config/history/ledger/runner/index) + unit-тесты (111 passed) |
 | 2025-09 | 35a7667 | Sprint 8: README + package.json + smoke-тест точки входа (115 passed) |
+| 2025-09 | d00407c | roadmap: синхронизация Design-секции со спринтами 6–8 |
+| 2025-09 | 7aba3b4 | Release review: мёртвый export убран, ARCHITECTURE синхронизирован с финальным layout |
