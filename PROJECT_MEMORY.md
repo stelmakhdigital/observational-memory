@@ -221,5 +221,10 @@ observational-memory/
   parseFrontMatter/renderTopicFile/renderMemoryMap), gap-markers (detectGap,
   humanDuration с русской плюрализацией, renderGapMarkers), cost (sumCosts по всем
   веткам, skip невалидных). Тестов: 64 passed.
-- Следующий шаг: Sprint 5 — prompts (observer/consolidator) + парсер worker-output +
-  тесты.
+- 2025-09: Sprint 5 выполнен: prompts (observer — атомарные наблюдения, строгий
+  формат OBSERVATIONS/END_OBSERVATIONS; consolidator — CONSOLIDATION_REPORT с
+  topics/journey_changed/consumed/dropped) + worker-output.ts (детерминированные
+  lenient-парсеры: строгий блок → bullets → bare paragraph; мусор → ok=false).
+  Тестов: 77 passed.
+- Следующий шаг: Sprint 6 — orchestrator (clocks, concurrency, idle-wait) +
+  интеграционные тесты на MockModelRunner.

@@ -42,7 +42,7 @@
 - [ ] Core: orchestrator (+ unit-тесты с mock-ModelRunner)
 - [x] Core: memory-store (+ unit-тесты)
 - [x] Core: gap-markers (+ unit-тесты)
-- [ ] Core: prompts + cost (+ тесты) — cost.ts готов и протестирован; prompts — со спринтом 5
+- [x] Core: prompts + cost (+ тесты) — prompts + worker-output parser готовы и протестированы
 - [ ] Adapter pi: events/session/runner/commands/ui
 - [ ] Интеграционные тесты пайплайна (mock runner)
 - [ ] README.md + docs (installation, configuration, usage)
@@ -69,4 +69,5 @@
 | 2025-09 | a4593cb | Sprint 1: skeleton пакета + core types/config/ids + unit-тесты (12 passed) |
 | 2025-09 | ca5532e | Sprint 2: tokens + chunker + unit-тесты (26 passed) |
 | 2025-09 | 1748fb4 | Sprint 3: ledger (pool/progress/render/serialize) + unit-тесты (45 passed) |
-| 2025-09 | —       | Sprint 4: memory-store + gap-markers + cost + unit-тесты (64 passed) |
+| 2025-09 | 21eedbb | Sprint 4: memory-store + gap-markers + cost + unit-тесты (64 passed) |
+| 2025-09 | —       | Sprint 5: prompts (observer/consolidator) + worker-output parser + тесты (77 passed) |
