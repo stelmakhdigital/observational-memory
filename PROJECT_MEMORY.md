@@ -198,5 +198,9 @@ observational-memory/
   Созданы PROJECT_MEMORY.md, roadmap.md, AGENTS.md.
 - 2025-09: решения приняты: ledger=`pi.appendEntry`, workers=subprocess `pi`,
   gap-markers перенесены в **v1**, v1 = observer/compaction/consolidator/cost + gap-markers.
-- Следующий шаг: оформить `docs/REQUIREMENTS.md` (закрыть Discovery) → фаза Design
-  (docs/ARCHITECTURE.md, WBS) по roadmap.md.
+- 2025-09: глобальное разрешение пользователя на коммиты — после каждого шага
+  коммит выполняется без дополнительного вопроса (фиксация от 2025-09).
+- 2025-09: создан `docs/REQUIREMENTS.md` (FR-1..FR-10, NFR, v1/v2, риски, критерии
+  приёмки) — фаза Discovery закрыта.
+- Следующий шаг: Planning — `docs/ARCHITECTURE.md` (слои, интерфейсы ядра,
+  потоки данных, состояние, ошибки) + WBS по шагам.

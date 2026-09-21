@@ -15,7 +15,7 @@
 - [x] Изучить концепцию OM по Mastra
 - [x] Определить поверхность адаптера pi (события, ctx, settings)
 - [x] Согласовать с пользователем: название пакета, структура, v1-состав фич (вопросы §7 в PROJECT_MEMORY.md)
-- [ ] Оформить документ требований (docs/REQUIREMENTS.md): функциональные/нефункциональные, scope v1/v2
+- [x] Оформить документ требований (docs/REQUIREMENTS.md): функциональные/нефункциональные, scope v1/v2 — Discovery закрыта
 
 ## 2. Планирование (PMBOK: Plan)
 - [ ] Architecture (docs/ARCHITECTURE.md): слои, интерфейсы ядра (ModelRunner, HistorySource,
@@ -63,4 +63,4 @@
 ## Журнал коммитов
 | Дата | Commit | Содержание |
 |------|--------|-----------|
-| —    | —      | —         |
+| 2025-09 | 594b50e | Discovery: чартер проекта, сбор требований, решения (PROJECT_MEMORY.md, roadmap.md, AGENTS.md, .gitignore) |
