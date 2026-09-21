@@ -1,0 +1,28 @@
+{
+  "name": "@arkalaust/observational-memory",
+  "version": "0.1.0-dev",
+  "description": "Agent-agnostic observational memory core with a pi-coding-agent adapter",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    "./core": "./src/core/index.ts",
+    "./adapters/pi": "./src/adapters/pi/index.ts",
+    "./adapters/pi/worker": "./src/adapters/pi/worker.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

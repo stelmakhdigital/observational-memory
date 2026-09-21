@@ -24,8 +24,8 @@
 - [x] План тестирования (unit core / integration orchestrator / smoke adapter) — ARCHITECTURE.md §8
 
 ## 3. Проектирование (Design)
-- [ ] package.json, tsconfig, vitest, лэйаут каталогов (core/, adapters/pi/, tests/, docs/)
-- [ ] Ядро: types + config (defaults, merge, invariants)
+- [x] package.json, tsconfig, vitest, лэйаут каталогов (core/, adapters/pi/, tests/, docs/)
+- [x] Ядро: types + config (defaults, merge, invariants)
 - [ ] Ядро: tokens (token estimation) + chunker (token-bounded slices)
 - [ ] Ядро: ledger (append-only pool, watermarks/coversUpToId, projection, deterministic render)
 - [ ] Ядро: orchestrator (observer clock, consolidator clock, compaction, concurrency, idle-wait)
@@ -65,4 +65,5 @@
 |------|--------|-----------|
 | 2025-09 | 594b50e | Discovery: чартер проекта, сбор требований, решения (PROJECT_MEMORY.md, roadmap.md, AGENTS.md, .gitignore) |
 | 2025-09 | d3256cf | Discovery: спецификация требований (docs/REQUIREMENTS.md) — фаза закрыта |
-| 2025-09 | —       | Planning: архитектура (docs/ARCHITECTURE.md) — commit в этом же шаге |
+| 2025-09 | d225aee | Planning: архитектура (docs/ARCHITECTURE.md) |
+| 2025-09 | —       | Sprint 1: skeleton пакета (package.json/tsconfig/vitest) + core types/config/ids + unit-тесты |

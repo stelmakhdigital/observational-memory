@@ -205,5 +205,7 @@ observational-memory/
 - 2025-09: создан `docs/ARCHITECTURE.md` (Planning): слои, модель данных, швы
   (ModelRunner/HistorySource/LedgerStore/EventSink/MemoryRoot), оркестрация, адаптер pi,
   ошибки, тест-стратегия, WBS §9 (9 спринтов), спайки S1/S2.
-- Следующий шаг: Implementation спринт 1 — skeleton пакета (package.json, tsconfig,
-  vitest, types, config) + unit-тесты; затем S1/S2 спайки по pi API.
+- 2025-09: Sprint 1 (Implementation) выполнен: skeleton пакета (@arkalaust/observational-memory,
+  exports ./core, ./adapters/pi), core types/config/ids, unit-тесты (12 passed), typecheck чистый.
+- Следующий шаг: Sprint 2 — tokens (estimateTokens) + chunker (token-bounded slices) + тесты;
+  параллельно спайки S1/S2 по pi API (compact-инъекция, appendEntry при /tree).
