@@ -26,7 +26,7 @@
 ## 3. Проектирование (Design)
 - [x] package.json, tsconfig, vitest, лэйаут каталогов (core/, adapters/pi/, tests/, docs/)
 - [x] Ядро: types + config (defaults, merge, invariants)
-- [ ] Ядро: tokens (token estimation) + chunker (token-bounded slices)
+- [x] Ядро: tokens (token estimation) + chunker (token-bounded slices)
 - [ ] Ядро: ledger (append-only pool, watermarks/coversUpToId, projection, deterministic render)
 - [ ] Ядро: orchestrator (observer clock, consolidator clock, compaction, concurrency, idle-wait)
 - [ ] Ядро: memory-store (topic files, INDEX.md, JOURNEY.md, fork-seed)
@@ -37,7 +37,7 @@
 - [ ] Adapter pi: команды /om*, status UI, конфиг settings.json
 
 ## 4. Реализация (Implementation)
-- [ ] Core: config + types + tokens + chunker (+ unit-тесты)
+- [x] Core: config + types + tokens + chunker (+ unit-тесты)
 - [ ] Core: ledger (+ unit-тесты)
 - [ ] Core: orchestrator (+ unit-тесты с mock-ModelRunner)
 - [ ] Core: memory-store (+ unit-тесты)
@@ -66,4 +66,5 @@
 | 2025-09 | 594b50e | Discovery: чартер проекта, сбор требований, решения (PROJECT_MEMORY.md, roadmap.md, AGENTS.md, .gitignore) |
 | 2025-09 | d3256cf | Discovery: спецификация требований (docs/REQUIREMENTS.md) — фаза закрыта |
 | 2025-09 | d225aee | Planning: архитектура (docs/ARCHITECTURE.md) |
-| 2025-09 | —       | Sprint 1: skeleton пакета (package.json/tsconfig/vitest) + core types/config/ids + unit-тесты |
+| 2025-09 | a4593cb | Sprint 1: skeleton пакета + core types/config/ids + unit-тесты (12 passed) |
+| 2025-09 | —       | Sprint 2: tokens + chunker (+ unit-тесты, 26 passed) |

@@ -207,5 +207,7 @@ observational-memory/
   ошибки, тест-стратегия, WBS §9 (9 спринтов), спайки S1/S2.
 - 2025-09: Sprint 1 (Implementation) выполнен: skeleton пакета (@arkalaust/observational-memory,
   exports ./core, ./adapters/pi), core types/config/ids, unit-тесты (12 passed), typecheck чистый.
-- Следующий шаг: Sprint 2 — tokens (estimateTokens) + chunker (token-bounded slices) + тесты;
-  параллельно спайки S1/S2 по pi API (compact-инъекция, appendEntry при /tree).
+- 2025-09: Sprint 2 выполнен: tokens (estimateTokens, быстрая эвристика без LLM) +
+  MessageChunker (token-bounded slices по границам сообщений, watermark, overlap,
+  re-observe при неизвестном watermark после /tree). Тестов: 26 passed.
+- Следующий шаг: Sprint 3 — ledger (pool/progress/projection/render/serialize) + тесты.
