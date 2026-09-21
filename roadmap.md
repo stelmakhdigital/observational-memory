@@ -45,12 +45,12 @@
 - [x] Core: prompts + cost (+ тесты) — prompts + worker-output parser готовы и протестированы
 - [x] Adapter pi: events/session/runner/commands/ui (спайки S1/S2 выполнены: session_before_compact → OM-блок как summary; appendEntry — branch-local, вне LLM-контекста)
 - [x] Интеграционные тесты пайплайна (mock runner)
-- [ ] README.md + docs (installation, configuration, usage)
+- [x] README.md + docs (installation, configuration, usage)
 
 ## 5. Тестирование (Verification / Testing)
-- [ ] npm run typecheck — чисто
-- [ ] npm test — все тесты зелёные
-- [ ] Smoke: установка в pi, /om on, сессия → observations создаются, /om:status, компакция
+- [x] npm run typecheck — чисто
+- [x] npm test — все тесты зелёные (115)
+- [ ] Smoke: установка в pi, /om on, сессия → observations создаются, /om:status, компакция (ручной, в реальном pi)
 
 ## 6. Релиз (PMBOK: Closing + Release)
 - [ ] Финальный обзор кода, чистка
@@ -72,4 +72,5 @@
 | 2025-09 | 21eedbb | Sprint 4: memory-store + gap-markers + cost + unit-тесты (64 passed) |
 | 2025-09 | 0b86968 | Sprint 5: prompts (observer/consolidator) + worker-output parser + тесты (77 passed) |
 | 2025-09 | 95dbb6b | Sprint 6: orchestrator + интеграционные тесты пайплайна (88 passed) |
-| 2025-09 | —       | Sprint 7: adapter pi (config/history/ledger/runner/index) + unit-тесты (111 passed) |
+| 2025-09 | d2d8f4a | Sprint 7: adapter pi (config/history/ledger/runner/index) + unit-тесты (111 passed) |
+| 2025-09 | —       | Sprint 8: README + package.json + smoke-тест точки входа (115 passed) |

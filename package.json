@@ -1,9 +1,10 @@
 {
   "name": "@arkalaust/observational-memory",
   "version": "0.1.0-dev",
-  "description": "Agent-agnostic observational memory core with a pi-coding-agent adapter",
+  "description": "Agent-agnostic observational memory core (observers/compaction/consolidator) with a pi-coding-agent adapter",
   "type": "module",
   "license": "MIT",
+  "keywords": ["observational-memory", "llm", "agent", "memory", "pi-coding-agent", "context-compaction"],
   "engines": {
     "node": ">=20"
   },

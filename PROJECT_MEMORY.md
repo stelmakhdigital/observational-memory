@@ -246,5 +246,9 @@ observational-memory/
   S2 — custom entries branch-local, не в LLM-контексте, переживают resume.
   Известное ограничение v1: воркеры с дефолтным набором тулов (scope-hardening — v1.1).
   Тестов: 111 passed (14 файлов).
-- Следующий шаг: Sprint 8 — README + docs (installation/config/usage) + финальная
-  полировка; затем smoke в реальном pi.
+- 2025-09: Sprint 8 (частично): README.md (установка/конфиг/архитектура/ограничения),
+  package.json (keywords/license), smoke-тест точки входа (default export — фабрика,
+  регистрит 5 событий + 4 команды, ленивый boot). Тестов: 115 passed.
+  Спринты 1–8 WBS по коду завершены; остаётся ручной smoke в реальном pi (roadmap §5).
+- Следующий шаг: ручной smoke в реальном pi (установка через settings.json, /om on,
+  проверка /om:status и компакции) — нужен живой pi с настроенным провайдером.

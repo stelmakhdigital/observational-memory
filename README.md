@@ -1,0 +1,138 @@
+# observational-memory
+
+Agent-agnostic **Observational Memory (OM)** для LLM-агентов + готовый адаптер для
+**pi-coding-agent**.
+
+OM решает проблему *context rot* и *context waste* в длинных сессиях: фоновые
+**observers** дистиллируют сырую историю диалога в атомарные **наблюдения**, которые
+детерминированно рендерятся в **блок компакции** (заменяя старую историю), а
+**consolidator** склеивает старейшие наблюдения в долговременные тематические файлы.
+
+- Концепция: Observer/Reflector по образцу [Mastra Observational Memory](https://mastra.ai/docs/memory/observational-memory)
+  и архитектуры [pi-observational-memory](https://github.com/amosblomqvist/pi-observational-memory)
+  (написано с нуля, без копирования кода).
+- Ядро **не знает** о конкретном агенте: агент-специфичное внедряется через интерфейсы
+  (`ModelRunner`, `HistorySource`, `LedgerStore`, `EventSink`, `MemoryRoot`).
+
+## Возможности
+
+- **Observers** — параллельные фоновые воркеры (чистые мапперы), режут token-bounded
+  слайсы истории и коммитят атомарные наблюдения; завершаются в любом порядке
+  (watermarks `coversUpToId`).
+- **Compaction block** — детерминированный (model-free) рендер: наблюдения +
+  memory map (front-matter тем) + journey + verbatim-хвост. В pi используется как
+  summary компакции (`session_before_compact`).
+- **Consolidator** — последовательный воркер; складывает старейшие наблюдения в
+  `.memory/<session>/<topic>.md` (+ `INDEX.md`, `JOURNEY.md`), буфер возвращается
+  к целевому размеру (tombstones).
+- **Journey** — описательная прозаическая история работы, append-mostly, вставляется
+  в каждый compaction block для ориентации.
+- **Gap markers** — временные якорь при возобновлении сессии после паузы (по умолч. ≥ 10 мин).
+- **Cost tracking** — стоимость фоновых LLM-вызовов, суммируется по всем веткам
+  (никогда не уменьшается при `/tree`), видна в статусе.
+- **Gate по умолчанию OFF** — расширение невидимо, пока не включить (`/om on`).
+
+## Установка
+
+Требуется Node.js ≥ 20 и **pi ≥ 0.86.1**.
+
+```bash
+# из этого репозитория
+npm install
+npm run typecheck   # tsc --noEmit
+npm test            # vitest (без LLM)
+```
+
+### Подключение к pi
+
+Расширение — это `src/adapters/pi/index.ts` (default export, принимает `ExtensionAPI`).
+Варианты:
+
+1. **Локально (разработка):** в `~/.pi/agent/settings.json` или `.pi/settings.json`:
+   ```json
+   { "extensions": ["/абсолютный/путь/к/observational-memory/src/adapters/pi/index.ts"] }
+   ```
+2. **Как pi-пакет** (npm/git) — см. `docs/packages.md` в документации pi.
+
+После установки доступны команды: `/om`, `/om:status`, `/om:compact`, `/om:consolidate`.
+
+## Использование
+
+```
+/om on            # включить OM для этой сессии (gate по умолчанию off)
+/om:status        # пул, consolidator, темы, journey, контекст, стоимость, ошибки
+/om:compact       # форсированная компакция через OM-блок
+/om:consolidate   # форсированная консолидация (фоновая)
+/om off           # выключить
+```
+
+Повседневный сценарий: `/om on` в начале длинной сессии. Observers работают сами
+на `turn_end`; при росте контекста компакция автоматически использует OM-блок;
+пул наблюдений периодически консолидируется в долгие файлы.
+
+## Конфигурация
+
+Неймспейс `observational-memory` в `~/.pi/agent/settings.json` (global) и
+`.pi/settings.json` (project, переопределяет global):
+
+```jsonc
+{
+  "observational-memory": {
+    "chunkTokens": 5000,           // токенов новой истории на observer-чанк
+    "chunkOverlapTokens": 0,       // overlap-контекст для связности
+    "poolTargetTokens": 10000,     // целевой размер буфера после консолидации
+    "consolidateAtPoolTokens": 20000, // порог запуска консолидации
+    "compactAtContextTokens": 100000, // порог контекста для компакции (тонировать под модель)
+    "tailTokens": 20000,           // verbatim-хвост (снапится на границу чанка)
+    "journeyTargetTokens": 1000,   // целевой размер JOURNEY.md
+    "observerConcurrency": 4,
+    "models": {
+      "observer":     { "id": "claude-sonnet-4-6", "thinking": "low" },
+      "consolidator": { "id": "claude-sonnet-4-6", "thinking": "medium" }
+    },
+    "passive": false,              // power-user: только ручные команды (для теста /tree)
+    "debugLog": false,
+    "gapMarkers": { "enabled": true, "thresholdMs": 600000 },
+    "piBinary": "pi"               // бинарник для воркеров (или env OM_PI_BIN)
+  }
+}
+```
+
+Переменные окружения: `OM_PI_BIN` (бинарник pi), `OM_WORKER_TIMEOUT_MS` (таймаут воркера).
+
+## Архитектура
+
+```
+raw chunks (token-bounded)
+  → parallel observers (headless `pi -p --mode json`)
+  → observations {id, coversUpToId, content, tokenCount}
+  → ledger (append-only, branch-local: pi.appendEntry)
+  → compaction block (deterministic, model-free)
+  → consolidator (headless, one at a time)
+  → .memory/<session>/<topic>.md + INDEX.md + JOURNEY.md (durable)
+```
+
+Слои: `src/core` (agent-agnostic, публичный API `./core`) → `src/adapters/pi`
+(`./adapters/pi`). Правило: `core` не импортирует `adapters`; все LLM-вызовы — через
+`ModelRunner`. Подробности — в `docs/ARCHITECTURE.md`, требования — в
+`docs/REQUIREMENTS.md`.
+
+## Тестирование
+
+```bash
+npm test          # 111 тестов: unit (core + adapter) + интеграция пайплайна (без LLM)
+npm run typecheck # tsc --noEmit
+```
+
+Воркеры в тестах — `MockRunner`/фейковый pi-бинарник, поэтому CI не расходует токены.
+
+## Известные ограничения (v1)
+
+- Воркеры запускаются с **дефолтным набором тулов** pi (у консолидатора есть доступ
+  к файлам проекта). Ограничение scope (worker-расширение со scoped tools) — v1.1.
+- `estimateTokens` — эвристика (chars/4 + densification), достаточно точная для
+  порогов (±10–20%).
+
+## Лицензия
+
+MIT.
