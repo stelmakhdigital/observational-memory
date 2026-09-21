@@ -202,5 +202,8 @@ observational-memory/
   коммит выполняется без дополнительного вопроса (фиксация от 2025-09).
 - 2025-09: создан `docs/REQUIREMENTS.md` (FR-1..FR-10, NFR, v1/v2, риски, критерии
   приёмки) — фаза Discovery закрыта.
-- Следующий шаг: Planning — `docs/ARCHITECTURE.md` (слои, интерфейсы ядра,
-  потоки данных, состояние, ошибки) + WBS по шагам.
+- 2025-09: создан `docs/ARCHITECTURE.md` (Planning): слои, модель данных, швы
+  (ModelRunner/HistorySource/LedgerStore/EventSink/MemoryRoot), оркестрация, адаптер pi,
+  ошибки, тест-стратегия, WBS §9 (9 спринтов), спайки S1/S2.
+- Следующий шаг: Implementation спринт 1 — skeleton пакета (package.json, tsconfig,
+  vitest, types, config) + unit-тесты; затем S1/S2 спайки по pi API.

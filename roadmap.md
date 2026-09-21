@@ -18,10 +18,10 @@
 - [x] Оформить документ требований (docs/REQUIREMENTS.md): функциональные/нефункциональные, scope v1/v2 — Discovery закрыта
 
 ## 2. Планирование (PMBOK: Plan)
-- [ ] Architecture (docs/ARCHITECTURE.md): слои, интерфейсы ядра (ModelRunner, HistorySource,
-      EventSink, MemoryRoot), потоки данных, состояние, ошибки
-- [ ] Детальный план реализации по спринтам/шагам (декомпозиция в WBS)
-- [ ] План тестирования (unit core / integration orchestrator / smoke adapter)
+- [x] Architecture (docs/ARCHITECTURE.md): слои, интерфейсы ядра (ModelRunner, HistorySource,
+      EventSink, MemoryRoot), потоки данных, состояние, ошибки — docs/ARCHITECTURE.md
+- [x] Детальный план реализации по спринтам/шагам (декомпозиция в WBS) — ARCHITECTURE.md §9
+- [x] План тестирования (unit core / integration orchestrator / smoke adapter) — ARCHITECTURE.md §8
 
 ## 3. Проектирование (Design)
 - [ ] package.json, tsconfig, vitest, лэйаут каталогов (core/, adapters/pi/, tests/, docs/)
@@ -64,3 +64,5 @@
 | Дата | Commit | Содержание |
 |------|--------|-----------|
 | 2025-09 | 594b50e | Discovery: чартер проекта, сбор требований, решения (PROJECT_MEMORY.md, roadmap.md, AGENTS.md, .gitignore) |
+| 2025-09 | d3256cf | Discovery: спецификация требований (docs/REQUIREMENTS.md) — фаза закрыта |
+| 2025-09 | —       | Planning: архитектура (docs/ARCHITECTURE.md) — commit в этом же шаге |
