@@ -270,3 +270,6 @@ observational-memory/
   только что консолидированным наблюдениям) и /om:extract (по активному пулу),
   cost byRole.extractor, статус extractedCount; 149 passed. Замечание: extracted/
   не копируется при fork-seed (v2-лимитация, задокументирована в тесте).
+- 2025-09: **релиз v0.1.0** — версия в package.json поднята до 0.1.0, тег v0.1.0
+  (согласовано с пользователем). Установка: `pi install git:github.com/arkalaust/observational-memory@v0.1.0`.
+  Осталось: ручной smoke в живом pi (первый шаг после тега).

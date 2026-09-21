@@ -54,7 +54,7 @@
 
 ## 6. Релиз (PMBOK: Closing + Release)
 - [x] Финальный обзор кода, чистка (7aba3b4: мёртвый export убран, ARCHITECTURE синхронизирован; 115 тестов зелёные)
-- [ ] Тег v0.1.0 (по согласованию)
+- [x] Тег v0.1.0 (по согласованию, поставлен пользователем)
 
 ## 7. Эксплуатация / Обратная связь (Post-project)
 - [ ] Сбор обратной связи от использования в pi
@@ -82,4 +82,6 @@
 | 2025-09 | 9cbc621 | docs: отметка релиз-обзора, журнал коммитов |
 | 2025-09 | 7d4728c | v1.1: worker scope-hardening (scoped-tools, worker.ts, runner --no-builtin-tools, 130 passed) |
 | 2025-09 | a76501e | Packaging для git-install: pi-манифест, keyword pi-package, typebox → peerDeps, packaging-тесты (134 passed) |
-| 2025-09 | —       | v2: extractors (ExtractorSpec, роль extractor, prompt+парсер, extracted/<id>.json, /om:extract, 149 passed) |
+| 2025-09 | f19ac2e | v2: extractors (ExtractorSpec, роль extractor, prompt+парсер, extracted/<id>.json, /om:extract, 149 passed) |
+| 2025-09 | 48926e5 | docs: packaging (git-install) и extractors в PROJECT_MEMORY/roadmap |
+| 2025-09 | v0.1.0  | version bump 0.1.0 + тег v0.1.0 (релиз) |
