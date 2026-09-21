@@ -225,9 +225,10 @@ onAgentEnd (idle):
   Выход — JSONL-события; `parsePiJsonl` извлекает финальный assistant-текст и
   cost из `usage.cost.total`; таймаут (workerTimeoutMs) → резкий finish + SIGKILL.
   Парсинг ответа — lenient-парсеры core (worker-output.ts).
-  **Ограничение v1:** воркеры работают с дефолтным набором тулов pi (консолидатору
-  нужен доступ к `.memory/<session>/`); scope-hardening (worker-расширение со
-  scoped tools, как в референсе) — v1.1.
+  **Scope-hardening (v1.1, готово):** воркеры запускаются с `--no-builtin-tools -e 
+  src/adapters/pi/worker.ts` (env `OM_WORKER=observer|consolidator`, `OM_WORKER_DIR`):
+  observer — без тулов (чистый маппер), consolidator — только scoped read/write/edit/
+  ls/grep с containment в session-каталог (scoped-tools.ts, без bash/сети).
 - `EventSink` → UI: `ctx.ui.setStatus('om', …)` (cost, пул), `ctx.ui.notify` (ошибки/статусы),
   gap-markers → `pi.sendMessage({customType:'om', display:false})` (hidden context anchor).
 - Compaction (S1): `session_before_compact` → `{compaction: {summary: block.text,
@@ -258,7 +259,7 @@ src/core/ledger/{index,pool,progress,render,serialize}.ts
 src/core/memory-store.ts  gap-markers.ts  cost.ts
 src/core/prompts/{observer,consolidator}.ts
 src/core/orchestrator.ts  index.ts (public API)
-src/adapters/pi/{index.ts,history.ts,ledger.ts,runner.ts,config.ts,types.ts}
+src/adapters/pi/{index.ts,history.ts,ledger.ts,runner.ts,worker.ts,scoped-tools.ts,config.ts,types.ts}
 tests/unit/*  tests/integration/*  tests/fixtures/*
 docs/{REQUIREMENTS,ARCHITECTURE}.md  README.md
 ```

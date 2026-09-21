@@ -11,6 +11,7 @@
  * hardening (worker extension with scoped tools, as in the reference) is v1.1.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { parseConsolidationReport, parseObserverOutput } from '../../core/worker-output.js';
 import { renderObserverPrompt } from '../../core/prompts/observer.js';
 import { renderConsolidatorPrompt } from '../../core/prompts/consolidator.js';
@@ -78,9 +79,13 @@ function contentText(content: unknown): string {
 }
 
 export class PiSubprocessRunner implements ModelRunner {
-  private active = new Map<string, ChildProcess>();
+  private readonly active = new Map<string, ChildProcess>();
+  /** Worker extension path (loaded by pi via -e in the worker subprocess). */
+  private readonly workerExt: string;
 
-  constructor(private readonly o: PiSubprocessRunnerOptions) {}
+  constructor(private readonly o: PiSubprocessRunnerOptions) {
+    this.workerExt = fileURLToPath(new URL('./worker.ts', import.meta.url));
+  }
 
   async run(role: Role, input: WorkerInput): Promise<WorkerResult> {
     const debug = this.o.debug ?? (() => {});
@@ -92,7 +97,21 @@ export class PiSubprocessRunner implements ModelRunner {
             journeyTargetTokens: this.o.journeyTargetTokens ?? 1000,
           });
     const model = role === 'observer' ? this.o.observerModel : this.o.consolidatorModel;
-    const args = ['-p', '--mode', 'json', '--model', modelFlag(model), '--no-extensions', '--', prompt];
+    const workerDir = role === 'consolidator' ? (input.pool?.sessionDir ?? this.o.cwd) : this.o.cwd;
+    const args = [
+      '-p',
+      '--mode', 'json',
+      '--model', modelFlag(model),
+      '--no-extensions',
+      '--no-builtin-tools',
+      '-e', this.workerExt,
+      '--', prompt,
+    ];
+    const env = {
+      ...process.env,
+      OM_WORKER: role,
+      OM_WORKER_DIR: workerDir,
+    };
 
     return new Promise<WorkerResult>((resolve) => {
       let settled = false;
@@ -105,7 +124,7 @@ export class PiSubprocessRunner implements ModelRunner {
 
       let proc: ChildProcess;
       try {
-        proc = spawn(this.o.piBinary, args, { cwd: this.o.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+        proc = spawn(this.o.piBinary, args, { cwd: this.o.cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
       } catch (e) {
         finish({ runId: input.runId, ok: false, error: `spawn failed: ${String(e)}` });
         return;

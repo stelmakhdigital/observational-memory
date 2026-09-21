@@ -92,6 +92,7 @@ export interface PiApi {
     description?: string;
     handler: (args: string, ctx: PiCommandContext) => Promise<void>;
   }): void;
+  registerTool(tool: { name: string; label?: string; description: string; parameters: unknown; execute: unknown; [k: string]: unknown }): void;
   exec?(command: string, args: string[], options?: { cwd?: string; timeout?: number }): Promise<{
     stdout: string;
     stderr: string;

@@ -253,4 +253,9 @@ observational-memory/
 - 2025-09: Release review (7aba3b4): мёртвый export `./adapters/pi/worker` удалён,
   ARCHITECTURE.md синхронизирован с финальным layout (фактически: 24 файла src, 2810 строк).
   Весь код WBS (спринты 1–8) + релиз-обзор завершены; typecheck 0 ошибок, 115 тестов.
-- Осталось: (1) ручной smoke в реальном pi; (2) тег v0.1.0 — по согласованию с пользователем.
+- 2025-09: v1.1 scope-hardening: воркеры теперь с `--no-builtin-tools` + worker-расширением
+  (`src/adapters/pi/worker.ts`, env OM_WORKER/OM_WORKER_DIR). Observer — без тулов;
+  consolidator — только scoped read/write/edit/ls/grep в `.memory/<session>/`
+  (scoped-tools.ts, path containment, 5 unit-тестов + runner/env-тесты; 130 passed).
+  typebox добавлен в dependencies. Осталось: (1) ручной smoke; (2) v0.1.0 тег;
+  (3) по плану: packaging для Git-install, затем extractors (v2).

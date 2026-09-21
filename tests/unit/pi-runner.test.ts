@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PiSubprocessRunner, parsePiJsonl } from '../../src/adapters/pi/runner.js';
@@ -7,11 +7,20 @@ import { PiSubprocessRunner, parsePiJsonl } from '../../src/adapters/pi/runner.j
 let dir: string;
 let fakePi: string;
 
-// Fake pi binary: emits a JSONL event stream; role is detected from the prompt.
+// Fake pi binary: records invocation (env + args) and emits a JSONL event stream;
+// role is detected from the prompt.
 const fakeScript = `
+import fs from 'node:fs';
 const args = process.argv.slice(2);
 const prompt = args[args.indexOf('--') + 1] ?? '';
 const isObserver = prompt.includes('OBSERVER');
+fs.writeFileSync('invocation.json', JSON.stringify({
+  omWorker: process.env.OM_WORKER,
+  omWorkerDir: process.env.OM_WORKER_DIR,
+  hasWorkerExt: args.includes('-e') && args[args.indexOf('-e') + 1].endsWith('worker.ts'),
+  noBuiltinTools: args.includes('--no-builtin-tools'),
+  model: args[args.indexOf('--model') + 1],
+}));
 const lines = [];
 lines.push(JSON.stringify({ type: 'session', version: 3, id: 'w1', timestamp: 't', cwd: '.' }));
 lines.push(JSON.stringify({ type: 'agent_start' }));
@@ -58,6 +67,20 @@ describe('parsePiJsonl', () => {
 });
 
 describe('PiSubprocessRunner', () => {
+  it('passes -e worker extension, --no-builtin-tools and OM_WORKER env', async () => {
+    await makeRunner().run('consolidator', {
+      runId: 'run-env',
+      role: 'consolidator',
+      pool: { observations: [], sessionDir: dir, journey: '' },
+    });
+    const inv = JSON.parse(readFileSync(path.join(dir, 'invocation.json'), 'utf8'));
+    expect(inv.omWorker).toBe('consolidator');
+    expect(inv.omWorkerDir).toBe(dir);
+    expect(inv.hasWorkerExt).toBe(true);
+    expect(inv.noBuiltinTools).toBe(true);
+    expect(inv.model).toBe('test-model');
+  });
+
   it('runs an observer subprocess and parses observations + cost', async () => {
     const r = await makeRunner().run('observer', {
       runId: 'run-1',
