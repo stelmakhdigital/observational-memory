@@ -17,6 +17,7 @@ export function sumCosts(entries: readonly TypedLedgerEntry<'om.cost'>[]): CostS
   const byRole: Record<Role, { usd: number; runs: number }> = {
     observer: { usd: 0, runs: 0 },
     consolidator: { usd: 0, runs: 0 },
+    extractor: { usd: 0, runs: 0 },
   };
   let totalUsd = 0;
   let runs = 0;

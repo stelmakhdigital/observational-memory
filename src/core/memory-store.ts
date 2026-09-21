@@ -60,7 +60,7 @@ export class MemoryStore implements MemoryRoot {
     if (existsSync(flag)) return; // one-time seeding (FR-4.4)
     if (existsSync(parentDir)) {
       for (const e of readdirSync(parentDir)) {
-        if (e === SEED_FLAG || e === '.runs') continue; // skip transient state
+        if (e === SEED_FLAG || e === '.runs' || e === 'extracted') continue; // skip transient state (extracted/ not seeded in v2)
         const src = path.join(parentDir, e);
         const dst = path.join(childDir, e);
         try {
@@ -107,6 +107,40 @@ export class MemoryStore implements MemoryRoot {
       return readFileSync(path.join(this.sessionDir(sessionId), JOURNEY_FILE), 'utf8');
     } catch {
       return '';
+    }
+  }
+
+  // ---- structured extractors (v2) -----------------------------------------
+
+  private extractedDir(sessionId: string): string {
+    return path.join(this.sessionDir(sessionId), 'extracted');
+  }
+
+  loadExtracted(sessionId: string, id: string): unknown {
+    try {
+      return JSON.parse(
+        readFileSync(path.join(this.extractedDir(sessionId), `${sanitizeName(id)}.json`), 'utf8'),
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  saveExtracted(sessionId: string, id: string, value: unknown): void {
+    const dir = this.extractedDir(sessionId);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, `${sanitizeName(id)}.json`), JSON.stringify(value, null, 2) + '\n', 'utf8');
+  }
+
+  /** Stored extractor ids (file names without extension). */
+  listExtracted(sessionId: string): string[] {
+    try {
+      return readdirSync(this.extractedDir(sessionId))
+        .filter((e) => e.endsWith('.json'))
+        .map((e) => e.replace(/\.json$/, ''))
+        .sort();
+    } catch {
+      return [];
     }
   }
 

@@ -3,7 +3,20 @@
  * See docs/ARCHITECTURE.md §2-3.
  */
 
-export type Role = 'observer' | 'consolidator';
+export type Role = 'observer' | 'consolidator' | 'extractor';
+
+/**
+ * A declarative extractor (Mastra-style): a named structured value pulled out
+ * of the active observation pool by a dedicated worker (v2 feature).
+ */
+export interface ExtractorSpec {
+  /** Filesystem-safe id: [a-z0-9_-]+ (used as the storage key/file name). */
+  id: string;
+  /** Human/LLM-readable name. */
+  name: string;
+  /** What to extract and how it evolves (fed into the prompt). */
+  description: string;
+}
 
 /** Atomic, self-contained note about what happened in a slice of history. */
 export interface Observation {
@@ -135,6 +148,15 @@ export interface WorkerInput {
     sessionDir: string;
     journey: string;
   };
+  /** Extractor: refresh structured values from the active observation pool. */
+  extract?: {
+    specs: ExtractorSpec[];
+    /** Previously stored values keyed by spec id (for merge/refresh). */
+    current: Record<string, unknown>;
+    /** Active observations to extract from. */
+    observations: Observation[];
+    sessionDir: string;
+  };
 }
 
 export interface ConsolidationResult {
@@ -154,6 +176,8 @@ export interface WorkerResult {
   observations?: string[];
   /** Consolidator output. */
   consolidation?: ConsolidationResult;
+  /** Extractor output: values keyed by extractor spec id. */
+  extraction?: Record<string, unknown>;
   costUsd?: number;
 }
 
@@ -218,6 +242,8 @@ export interface OmStatus {
   nextObserverInTokens: number | null;
   consolidationPending: boolean;
   topicCount: number;
+  /** Count of stored extractor values (v2; undefined in older core versions). */
+  extractedCount?: number;
   journeyTokens: number;
   contextTokens: number | null;
   costUsd: number;
@@ -279,6 +305,10 @@ export interface MemoryRoot {
   readJourney(sessionId: string): string;
   /** Orchestrator-owned INDEX.md re-render from topic front-matter. */
   renderIndex(sessionId: string): void;
+  /** Structured extractor values (v2). */
+  loadExtracted(sessionId: string, id: string): unknown;
+  saveExtracted(sessionId: string, id: string, value: unknown): void;
+  listExtracted(sessionId: string): string[];
 }
 
 export interface Clock {

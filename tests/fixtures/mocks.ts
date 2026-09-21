@@ -120,11 +120,13 @@ export class MockRunner implements ModelRunner {
   failures = 0;
   private failCounters = new Map<string, number>();
 
-  constructor(private observer: ScriptedRun, private consolidator: ScriptedRun) {}
+  constructor(private observer: ScriptedRun, private consolidator: ScriptedRun, private extractor?: ScriptedRun) {}
 
   async run(role: Role, input: WorkerInput): Promise<WorkerResult> {
     this.calls.push({ role, input });
-    const run = role === 'observer' ? this.observer : this.consolidator;
+    const defaultExtraction: ScriptedRun = { result: (i) => ({ runId: i.runId, ok: true, extraction: {} }) };
+    const run =
+      role === 'observer' ? this.observer : role === 'extractor' ? (this.extractor ?? defaultExtraction) : this.consolidator;
     this.inFlight++;
     try {
       await sleep(run.delayMs ?? 1);

@@ -191,6 +191,17 @@ onAgentEnd (idle):
 - Формат вывода воркера — структурный (markdown с явными секциями), парсер в core
   (детерминированный, тестируется без LLM).
 
+### 4.5.1 Extractors (v2, Mastra-style)
+
+- `ExtractorSpec { id: [a-z0-9_-]{1,64}, name, description }`; конфиг `extractors` (по
+  умолч. один `profile`), `extractors: []` — выключить. Модель `models.extractor` (по
+  умолч. = consolidator).
+- Триггеры: после успешной консолидации — по **только что консолидированным**
+  наблюдениям (пул уже tombstoned) + ручной `/om:extract` — по активному пулу.
+- Воркер возвращает строгий JSON-блок (EXTRACTED_JSON), lenient-парсер
+  `parseExtractorOutput`; значения складываются в `.memory/<session>/extracted/<id>.json`.
+- Cost экстрактора учитывается в общем cost (byRole.extractor); статус: extractedCount.
+
 ### 4.6 Gap markers (FR-8)
 
 - `GapMarkerDetector.check(lastAt, now, thresholdMs)` → опциональный GapMarker.
@@ -257,7 +268,7 @@ tsconfig.json  vitest.config.ts
 src/core/types.ts  config.ts  tokens.ts  chunker.ts  ids.ts  worker-output.ts
 src/core/ledger/{index,pool,progress,render,serialize}.ts
 src/core/memory-store.ts  gap-markers.ts  cost.ts
-src/core/prompts/{observer,consolidator}.ts
+src/core/prompts/{observer,consolidator,extractor}.ts
 src/core/orchestrator.ts  index.ts (public API)
 src/adapters/pi/{index.ts,history.ts,ledger.ts,runner.ts,worker.ts,scoped-tools.ts,config.ts,types.ts}
 tests/unit/*  tests/integration/*  tests/fixtures/*

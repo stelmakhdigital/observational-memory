@@ -6,15 +6,17 @@
  * (renderObserverPrompt / renderConsolidatorPrompt); the JSONL event stream
  * provides the final assistant text and cumulative usage (cost.total).
  *
- * NOTE (v1): worker subprocesses run with the default tool set in the project
- * cwd. The consolidator needs write access to <memoryDir>/<session>/; scope
- * hardening (worker extension with scoped tools, as in the reference) is v1.1.
+ * NOTE (v1.1): worker subprocesses run with `--no-builtin-tools` + the worker
+ * extension (worker.ts): observer — no tools; consolidator/extractor — scoped
+ * file tools limited to the session memory dir (extractor is read-only in
+ * practice: it returns JSON, files are written by the core).
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseConsolidationReport, parseObserverOutput } from '../../core/worker-output.js';
+import { parseConsolidationReport, parseExtractorOutput, parseObserverOutput } from '../../core/worker-output.js';
 import { renderObserverPrompt } from '../../core/prompts/observer.js';
 import { renderConsolidatorPrompt } from '../../core/prompts/consolidator.js';
+import { renderExtractorPrompt } from '../../core/prompts/extractor.js';
 import type {
   ModelRunner,
   Role,
@@ -29,6 +31,8 @@ export interface PiSubprocessRunnerOptions {
   cwd: string;
   observerModel: ModelRef;
   consolidatorModel: ModelRef;
+  /** Defaults to consolidatorModel when absent. */
+  extractorModel?: ModelRef;
   sessionLabel?: string;
   journeyTargetTokens?: number;
   timeoutMs?: number;
@@ -92,11 +96,14 @@ export class PiSubprocessRunner implements ModelRunner {
     const prompt =
       role === 'observer'
         ? renderObserverPrompt(input, { sessionLabel: this.o.sessionLabel })
-        : renderConsolidatorPrompt(input, {
-            session: (this.o.sessionLabel ?? '').slice(-32) || 'session',
-            journeyTargetTokens: this.o.journeyTargetTokens ?? 1000,
-          });
-    const model = role === 'observer' ? this.o.observerModel : this.o.consolidatorModel;
+        : role === 'extractor'
+          ? renderExtractorPrompt(input, { sessionLabel: this.o.sessionLabel })
+          : renderConsolidatorPrompt(input, {
+              session: (this.o.sessionLabel ?? '').slice(-32) || 'session',
+              journeyTargetTokens: this.o.journeyTargetTokens ?? 1000,
+            });
+    const model =
+      role === 'observer' ? this.o.observerModel : (this.o.extractorModel ?? this.o.consolidatorModel);
     const workerDir = role === 'consolidator' ? (input.pool?.sessionDir ?? this.o.cwd) : this.o.cwd;
     const args = [
       '-p',
@@ -171,6 +178,15 @@ export class PiSubprocessRunner implements ModelRunner {
             return;
           }
           finish({ runId: input.runId, ok: true, observations: p.observations, costUsd: costUsd > 0 ? costUsd : undefined });
+          return;
+        }
+        if (role === 'extractor') {
+          const x = parseExtractorOutput(body);
+          if (!x.ok) {
+            finish({ runId: input.runId, ok: false, costUsd: costUsd > 0 ? costUsd : undefined, error: x.error });
+            return;
+          }
+          finish({ runId: input.runId, ok: true, extraction: x.values, costUsd: costUsd > 0 ? costUsd : undefined });
           return;
         }
         const r = parseConsolidationReport(body);

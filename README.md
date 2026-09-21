@@ -28,8 +28,12 @@ OM решает проблему *context rot* и *context waste* в длинн�
 - **Journey** — описательная прозаическая история работы, append-mostly, вставляется
   в каждый compaction block для ориентации.
 - **Gap markers** — временные якорь при возобновлении сессии после паузы (по умолч. ≥ 10 мин).
-- **Cost tracking** — стоимость фоновых LLM-вызовов, суммируется по всем веткам
-  (никогда не уменьшается при `/tree`), видна в статусе.
+- **Cost tracking** — стоимость фоновых LLM-вызовов (включая экстракторы),
+  суммируется по всем веткам (никогда не уменьшается при `/tree`), видна в статусе.
+- **Extractors (v2)** — именованные структурированные значения (по умолч. `profile`:
+  профиль и предпочтения пользователя), обновляются после консолидации по
+  только что консолидированным наблюдениям; хранение `.memory/<session>/extracted/<id>.json`.
+  Настраиваются/отключаются в `extractors`, форсируются командой `/om:extract`.
 - **Безопасные воркеры** — observer без тулов, consolidator с доступом только к
   своему session-каталогу памяти.
 - **Gate по умолчанию OFF** — расширение невидимо, пока не включить (`/om on`).
@@ -65,7 +69,7 @@ typebox — peerDependency, поставляется самим pi).
 { "extensions": ["/абсолютный/путь/к/observational-memory/src/adapters/pi/index.ts"] }
 ```
 
-После установки доступны команды: `/om`, `/om:status`, `/om:compact`, `/om:consolidate`.
+После установки доступны команды: `/om`, `/om:status`, `/om:compact`, `/om:consolidate`, `/om:extract`.
 
 ## Использование
 
@@ -74,6 +78,7 @@ typebox — peerDependency, поставляется самим pi).
 /om:status        # пул, consolidator, темы, journey, контекст, стоимость, ошибки
 /om:compact       # форсированная компакция через OM-блок
 /om:consolidate   # форсированная консолидация (фоновая)
+/om:extract       # форсированное обновление экстракторов (фоновое)
 /om off           # выключить
 ```
 
@@ -99,8 +104,14 @@ typebox — peerDependency, поставляется самим pi).
     "observerConcurrency": 4,
     "models": {
       "observer":     { "id": "claude-sonnet-4-6", "thinking": "low" },
-      "consolidator": { "id": "claude-sonnet-4-6", "thinking": "medium" }
+      "consolidator": { "id": "claude-sonnet-4-6", "thinking": "medium" },
+      "extractor":    { "id": "claude-sonnet-4-6", "thinking": "low" } // опц., по умолч. = consolidator
     },
+    "extractors": [                    // пустой список [] — выключить экстракторы
+      { "id": "profile",
+        "name": "User profile & preferences",
+        "description": "Stable facts about the user and their preferences..." }
+    ],
     "passive": false,              // power-user: только ручные команды (для теста /tree)
     "debugLog": false,
     "gapMarkers": { "enabled": true, "thresholdMs": 600000 },
@@ -121,6 +132,7 @@ raw chunks (token-bounded)
   → compaction block (deterministic, model-free)
   → consolidator (headless, one at a time)
   → .memory/<session>/<topic>.md + INDEX.md + JOURNEY.md (durable)
+  → extractors (headless, after consolidation) → .memory/<session>/extracted/<id>.json
 ```
 
 Слои: `src/core` (agent-agnostic, публичный API `./core`) → `src/adapters/pi`
@@ -131,7 +143,7 @@ raw chunks (token-bounded)
 ## Тестирование
 
 ```bash
-npm test          # 111 тестов: unit (core + adapter) + интеграция пайплайна (без LLM)
+npm test          # 149 тестов: unit (core + adapter) + интеграция пайплайна (без LLM)
 npm run typecheck # tsc --noEmit
 ```
 

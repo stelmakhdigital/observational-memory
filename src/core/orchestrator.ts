@@ -26,7 +26,9 @@ import type {
   LedgerStore,
   MemoryRoot,
   ModelRunner,
+  Observation,
   OmStatus,
+  Role,
   RunInfo,
   WorkerInput,
   WorkerResult,
@@ -49,7 +51,7 @@ export interface OrchestratorDeps {
 
 interface InFlight {
   runId: string;
-  role: 'observer' | 'consolidator';
+  role: Role;
   startedAt: string;
   promise: Promise<void>;
 }
@@ -66,6 +68,7 @@ export class OmOrchestrator {
   private inFlight: InFlight[] = [];
   private pendingChunks = new Set<string>();
   private consolidating = false;
+  private extracting = false;
   private lastGapMarkedFor: Date | null = null;
   private compactedForTokens = 0;
 
@@ -264,10 +267,12 @@ export class OmOrchestrator {
     const consumed = c.tombstoneIds.filter((id) => allowed.has(id));
     const dropped = c.droppedIds.filter((id) => allowed.has(id));
     const all = [...consumed, ...dropped];
+    let evidence: Observation[] = [];
     if (all.length > 0) {
       // preserve the watermark: tombstoned history stays "processed" (FR-1.3)
       const poolObs = this.pool().observations;
       const tombstonedObs = poolObs.filter((o) => all.includes(o.id));
+      evidence = tombstonedObs;
       const maxCoversUpToId = tombstonedObs.reduce(
         (m, o) => (o.coversUpToId > m ? o.coversUpToId : m),
         '',
@@ -285,7 +290,64 @@ export class OmOrchestrator {
     }
     this.d.memory.renderIndex(this.sessionId);
     this.log(`consolidation ${runId}: tombstoned ${all.length} observations`);
+    this.startExtraction('post-consolidation', evidence);
     this.emitStatus();
+  }
+
+  // ---- extractors (v2) -----------------------------------------------------
+
+  /** Refresh structured extractor values from the active observation pool. */
+  forceExtract(): void {
+    this.startExtraction('manual');
+  }
+
+  private startExtraction(reason: 'post-consolidation' | 'manual', evidence?: Observation[]): void {
+    if (!this.enabled || this.extracting || this.cfg.extractors.length === 0) return;
+    // Post-consolidation: the pool is drained by the tombstone, so extract from
+    // the just-consolidated observations (newest first). Manual: active pool.
+    const observations =
+      evidence && evidence.length > 0
+        ? [...evidence].reverse()
+        : reason === 'manual'
+          ? [...this.pool().observations].reverse()
+          : [];
+    if (observations.length === 0) return;
+    this.extracting = true;
+    const current: Record<string, unknown> = {};
+    for (const spec of this.cfg.extractors) {
+      const v = this.d.memory.loadExtracted(this.sessionId, spec.id);
+      if (v !== undefined) current[spec.id] = v;
+    }
+    const runId = newRunId();
+    const input: WorkerInput = {
+      runId,
+      role: 'extractor',
+      extract: {
+        specs: this.cfg.extractors,
+        current,
+        observations,
+        sessionDir: this.d.memory.sessionDir(this.sessionId),
+      },
+    };
+    const task = this.runWorker(input, (res) => {
+      const values = res.extraction ?? {};
+      for (const spec of this.cfg.extractors) {
+        if (Object.prototype.hasOwnProperty.call(values, spec.id)) {
+          this.d.memory.saveExtracted(this.sessionId, spec.id, values[spec.id]);
+        }
+      }
+      this.log(`extraction ${runId} (${reason}): saved ${Object.keys(values).length} values`);
+    });
+    this.inFlight.push({
+      runId,
+      role: 'extractor',
+      startedAt: this.now().toISOString(),
+      promise: task.finally(() => {
+        this.extracting = false;
+        this.emitStatus();
+      }),
+    });
+    this.log(`extraction started (${reason})`);
   }
 
   // ---- gap markers (FR-8) --------------------------------------------------
@@ -453,7 +515,7 @@ export class OmOrchestrator {
     return attempt(1);
   }
 
-  private recordRun(runId: string, role: 'observer' | 'consolidator', status: 'ok' | 'error', costUsd?: number, error?: string): void {
+  private recordRun(runId: string, role: Role, status: 'ok' | 'error', costUsd?: number, error?: string): void {
     const at = this.now().toISOString();
     this.d.ledger.append({
       type: 'om.run',
@@ -487,6 +549,7 @@ export class OmOrchestrator {
       nextObserverInTokens: this.nextObserverProgress(),
       consolidationPending: this.consolidating,
       topicCount: this.d.memory.listTopics(this.sessionId).length,
+      extractedCount: this.d.memory.listExtracted(this.sessionId).length,
       journeyTokens: this.estimate(this.d.memory.readJourney(this.sessionId)),
       contextTokens: this.safeContextTokens(),
       costUsd: costs.totalUsd,

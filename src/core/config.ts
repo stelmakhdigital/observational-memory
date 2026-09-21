@@ -3,6 +3,7 @@
  * See docs/REQUIREMENTS.md §3 FR-9.
  */
 import { OmError } from './types.js';
+import type { ExtractorSpec } from './types.js';
 
 export interface ModelRef {
   provider?: string;
@@ -35,7 +36,11 @@ export interface OmConfig {
   models: {
     observer: ModelRef;
     consolidator: ModelRef;
+    /** Optional; defaults to the consolidator model. */
+    extractor?: ModelRef;
   };
+  /** Structured extractors (Mastra-style, v2). Empty list disables extraction. */
+  extractors: ExtractorSpec[];
   /** Power-user: disables all automatic triggers (FR-7.4). */
   passive: boolean;
   debugLog: boolean;
@@ -58,6 +63,15 @@ export const DEFAULT_CONFIG: OmConfig = {
   passive: false,
   debugLog: false,
   gapMarkers: { enabled: true, thresholdMs: 10 * 60 * 1000 },
+  extractors: [
+    {
+      id: 'profile',
+      name: 'User profile & preferences',
+      description:
+        'Stable facts about the user and their preferences that persist across sessions: '
+        + 'communication language, coding style, stack, recurring workflows, do/don’t rules.',
+    },
+  ],
 };
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -95,6 +109,20 @@ export function validateConfig(c: OmConfig): void {
   if (!c.models?.observer?.id || !c.models?.consolidator?.id)
     problems.push('models.observer.id and models.consolidator.id are required');
   if (c.gapMarkers.thresholdMs <= 0) problems.push('gapMarkers.thresholdMs must be > 0');
+  if (!Array.isArray(c.extractors)) problems.push('extractors must be an array');
+  else {
+    const ids = new Set<string>();
+    for (const e of c.extractors as ExtractorSpec[]) {
+      if (!/^[a-z0-9_-]{1,64}$/.test(e?.id ?? '')) {
+        problems.push(`extractor id must match [a-z0-9_-]{1,64}: ${String(e?.id)}`);
+      } else if (ids.has(e.id)) {
+        problems.push(`duplicate extractor id: ${e.id}`);
+      } else {
+        ids.add(e.id);
+      }
+      if (!e?.name || !e?.description) problems.push(`extractor ${String(e?.id)} needs name and description`);
+    }
+  }
   if (problems.length > 0) {
     throw new OmError(`Invalid observational-memory config: ${problems.join('; ')}`, 'config-invalid');
   }

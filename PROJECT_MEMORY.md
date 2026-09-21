@@ -257,5 +257,11 @@ observational-memory/
   (`src/adapters/pi/worker.ts`, env OM_WORKER/OM_WORKER_DIR). Observer — без тулов;
   consolidator — только scoped read/write/edit/ls/grep в `.memory/<session>/`
   (scoped-tools.ts, path containment, 5 unit-тестов + runner/env-тесты; 130 passed).
-  typebox добавлен в dependencies. Осталось: (1) ручной smoke; (2) v0.1.0 тег;
-  (3) по плану: packaging для Git-install, затем extractors (v2).
+  typebox добавлен в peerDependencies (pi бандлит его). Осталось: (1) ручной smoke;
+  (2) v0.1.0 тег.
+- 2025-09: v2 extractors: ExtractorSpec (ид по умолч. `profile`), роль `extractor` в
+  ModelRunner, prompt EXTRACTED_JSON + lenient-парсер, хранение
+  `.memory/<session>/extracted/<id>.json`, триггеры: после консолидации (по
+  только что консолидированным наблюдениям) и /om:extract (по активному пулу),
+  cost byRole.extractor, статус extractedCount; 149 passed. Замечание: extracted/
+  не копируется при fork-seed (v2-лимитация, задокументирована в тесте).

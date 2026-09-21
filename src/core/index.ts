@@ -15,3 +15,4 @@ export * from './worker-output.js';
 export { OmOrchestrator, type OrchestratorDeps } from './orchestrator.js';
 export { renderObserverPrompt } from './prompts/observer.js';
 export { renderConsolidatorPrompt } from './prompts/consolidator.js';
+export { renderExtractorPrompt } from './prompts/extractor.js';

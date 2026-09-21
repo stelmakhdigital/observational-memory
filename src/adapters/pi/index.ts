@@ -113,6 +113,7 @@ export default function observationalMemory(pi: PiApi): OmExtension {
       cwd: ctx.cwd,
       observerModel: config.om.models.observer,
       consolidatorModel: config.om.models.consolidator,
+      extractorModel: config.om.models.extractor,
       sessionLabel: path.basename(ctx.cwd),
       journeyTargetTokens: config.om.journeyTargetTokens,
       timeoutMs: config.workerTimeoutMs,
@@ -215,6 +216,7 @@ export default function observationalMemory(pi: PiApi): OmExtension {
         `pool: ${s.activeObservations} observations (~${s.poolTokens} tokens)`,
         `consolidator: ${s.consolidationPending ? 'running' : 'idle'}`,
         `memory: ${s.topicCount} topics, journey ~${s.journeyTokens} tokens`,
+        s.extractedCount !== undefined ? `extracted: ${s.extractedCount} values` : '',
         `context: ${s.contextTokens ?? '?'} tokens`,
         `session cost: $${s.costUsd.toFixed(3)} (${s.runs} runs)`,
         `in flight: ${s.inFlight.map((i) => i.role).join(', ') || 'none'}`,
@@ -246,6 +248,19 @@ export default function observationalMemory(pi: PiApi): OmExtension {
       }
       r.orch.forceConsolidate();
       report(ctx, ['Consolidation started (background). Check /om:status.']);
+    },
+  });
+
+  pi.registerCommand('om:extract', {
+    description: 'Force a structured-extractor refresh now (profile, …)',
+    handler: async (_args, ctx) => {
+      const r = track(ctx);
+      if (!r.orch.isEnabled()) {
+        report(ctx, ['OM is off — enable with /om on first.']);
+        return;
+      }
+      r.orch.forceExtract();
+      report(ctx, ['Extraction started (background). Check /om:status.']);
     },
   });
 

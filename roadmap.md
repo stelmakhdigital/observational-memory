@@ -60,7 +60,8 @@
 - [ ] Сбор обратной связи от использования в pi
 - [x] v1.1: worker scope-hardening (scoped tools, --no-builtin-tools, worker-расширение)
 - [x] Packaging: установка через Git (`pi install git:...`), pi-манифест, без npm-публикации
-- [ ] v2: extractors (Mastra-style), early activation, другие адаптеры
+- [x] v2: extractors (Mastra-style)
+- [ ] v2+: early activation, другие адаптеры
 
 ## Журнал коммитов
 | Дата | Commit | Содержание |
@@ -80,4 +81,5 @@
 | 2025-09 | 7aba3b4 | Release review: мёртвый export убран, ARCHITECTURE синхронизирован с финальным layout |
 | 2025-09 | 9cbc621 | docs: отметка релиз-обзора, журнал коммитов |
 | 2025-09 | 7d4728c | v1.1: worker scope-hardening (scoped-tools, worker.ts, runner --no-builtin-tools, 130 passed) |
-| 2025-09 | —       | Packaging для git-install: pi-манифест, keyword pi-package, typebox → peerDeps, packaging-тесты (134 passed) |
+| 2025-09 | a76501e | Packaging для git-install: pi-манифест, keyword pi-package, typebox → peerDeps, packaging-тесты (134 passed) |
+| 2025-09 | —       | v2: extractors (ExtractorSpec, роль extractor, prompt+парсер, extracted/<id>.json, /om:extract, 149 passed) |

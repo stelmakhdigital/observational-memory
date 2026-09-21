@@ -86,3 +86,39 @@ export function parseConsolidationReport(raw: string): ParsedConsolidationReport
     droppedIds: csv(field('dropped')),
   };
 }
+
+export interface ParsedExtraction {
+  ok: boolean;
+  /** Values keyed by extractor spec id. */
+  values: Record<string, unknown>;
+  error?: string;
+}
+
+const JSON_BLOCK = /EXTRACTED_JSON\s*\n([\s\S]*?)\n?\s*END_EXTRACTED_JSON/;
+
+/**
+ * Lenient parser for extractor output: prefer the EXTRACTED_JSON block, fall
+ * back to the first balanced {...} object in the reply.
+ */
+export function parseExtractorOutput(raw: string): ParsedExtraction {
+  const text = raw.trim();
+  const m = JSON_BLOCK.exec(text);
+  const candidates: string[] = [];
+  if (m) candidates.push(m[1]!);
+  const braceStart = text.indexOf('{');
+  const braceEnd = text.lastIndexOf('}');
+  if (braceStart !== -1 && braceEnd > braceStart) {
+    candidates.push(text.slice(braceStart, braceEnd + 1));
+  }
+  for (const c of candidates) {
+    try {
+      const v: unknown = JSON.parse(c.trim());
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        return { ok: true, values: v as Record<string, unknown> };
+      }
+    } catch {
+      /* try next candidate */
+    }
+  }
+  return { ok: false, values: {}, error: 'no JSON object found in extractor output' };
+}

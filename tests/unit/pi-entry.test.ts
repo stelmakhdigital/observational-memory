@@ -40,7 +40,7 @@ describe('pi adapter entry (smoke)', () => {
     for (const ev of ['session_start', 'turn_end', 'agent_end', 'session_before_compact', 'session_shutdown']) {
       expect(handlers.has(ev), `handler ${ev}`).toBe(true);
     }
-    for (const cmd of ['om', 'om:status', 'om:compact', 'om:consolidate']) {
+    for (const cmd of ['om', 'om:status', 'om:compact', 'om:consolidate', 'om:extract']) {
       expect(commands.has(cmd), `command ${cmd}`).toBe(true);
     }
   });
