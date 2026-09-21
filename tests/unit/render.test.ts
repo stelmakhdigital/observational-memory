@@ -33,19 +33,24 @@ describe('renderPool', () => {
 });
 
 describe('selectBeforeTail (FR-3.4 no double representation)', () => {
-  it('excludes chunk boundaries that reach into the verbatim tail', () => {
+  it('keeps only chunk boundaries within the pre-tail region', () => {
     const o = [
       obs('om-1', 'm1'),
       obs('om-2', 'm2'),
-      obs('om-3', 'm5'), // chunk covering m3..m5 overlaps tail starting at m4
+      obs('om-3', 'm5'), // chunk covering m3..m5; tail starts at m4 → boundary m3
     ];
-    const sel = selectBeforeTail(o, 'm4');
+    const sel = selectBeforeTail(o, 'm3');
     expect(sel.map((x) => x.id)).toEqual(['om-1', 'om-2']);
   });
 
-  it('empty tailStartId keeps everything', () => {
+  it('empty boundary (tail covers everything) → no observations', () => {
     const o = [obs('om-1', 'm1')];
-    expect(selectBeforeTail(o, '').map((x) => x.id)).toEqual(['om-1']);
+    expect(selectBeforeTail(o, '')).toEqual([]);
+  });
+
+  it('boundary after all chunks keeps everything', () => {
+    const o = [obs('om-1', 'm1'), obs('om-2', 'm2')];
+    expect(selectBeforeTail(o, 'm9').map((x) => x.id)).toEqual(['om-1', 'om-2']);
   });
 });
 

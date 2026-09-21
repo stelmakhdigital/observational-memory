@@ -226,5 +226,14 @@ observational-memory/
   topics/journey_changed/consumed/dropped) + worker-output.ts (детерминированные
   lenient-парсеры: строгий блок → bullets → bare paragraph; мусор → ok=false).
   Тестов: 77 passed.
-- Следующий шаг: Sprint 6 — orchestrator (clocks, concurrency, idle-wait) +
-  интеграционные тесты на MockModelRunner.
+- 2025-09: Sprint 6 выполнен: OmOrchestrator — gate (setEnabled/restoreEnabled, fork-seed),
+  observer pump (dedup pendingChunks — один observer на слайс, watermark двигается
+  только после коммита), consolidator (serial, force), gap-markers (один на паузу),
+  compaction (drain → block → sink), retry-once + om.lastError, status, shutdown.
+  Ключевые решения/фиксы: WorkerResult.observations — string[] (id/tokenCount
+  генерит оркестратор); watermark переживает tombstones через метаданные
+  (maxCoversUpToId/maxSeq); tail boundary = последнее сообщение НЕ в хвосте,
+  '' = хвост покрывает всё (наблюдения не рендерятся).
+  Тестов: 88 passed (10 файлов, вкл. интеграцию пайплайна на MockRunner).
+- Следующий шаг: Sprint 7 — adapter pi: config/history/ledger/UI/commands
+  (+ спайки S1/S2 по pi API: compact-инъекция, appendEntry при /tree).

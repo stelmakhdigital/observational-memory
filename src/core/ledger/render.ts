@@ -23,20 +23,21 @@ export function renderPool(observations: readonly Observation[]): string {
 }
 
 /**
- * Select observations that do NOT overlap the verbatim tail.
- * Chunks = groups sharing the same coversUpToId (one observer slice).
- * A chunk is included only if its watermark is strictly before the tail start.
+ * Select observations that do NOT overlap the verbatim tail (FR-3.4).
+ * @param tailBoundaryId id of the LAST message NOT included in the tail;
+ *   '' means the tail covers the whole history → no observations are rendered.
+ * A chunk (group sharing coversUpToId) is kept only when its watermark is
+ * within the pre-tail region, snapping the cutoff to a chunk boundary.
  */
 export function selectBeforeTail(
   observations: readonly Observation[],
-  tailStartId: string,
+  tailBoundaryId: string,
 ): Observation[] {
-  if (tailStartId === '') return [...observations];
+  if (tailBoundaryId === '') return [];
   const out: Observation[] = [];
   for (const o of observations) {
     if (o.coversUpToId === '') continue; // malformed: never render
-    // tail start id is a message id; watermarks are message ids of the same space
-    if (o.coversUpToId < tailStartId) out.push(o);
+    if (o.coversUpToId <= tailBoundaryId) out.push(o);
   }
   return out;
 }

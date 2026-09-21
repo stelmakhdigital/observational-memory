@@ -77,6 +77,8 @@ export function parse<K extends PayloadType>(
     case 'om.tombstone':
       if (!Array.isArray(d.observationIds) || typeof d.journeyChanged !== 'boolean' || !Array.isArray(d.topics))
         return null;
+      if (d.maxCoversUpToId !== undefined && typeof d.maxCoversUpToId !== 'string') return null;
+      if (d.maxSeq !== undefined && typeof d.maxSeq !== 'number') return null;
       break;
     case 'om.cost':
       if (!isStr(d.runId) || typeof d.usd !== 'number') return null;

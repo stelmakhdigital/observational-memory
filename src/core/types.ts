@@ -48,6 +48,10 @@ export interface TombstoneReport {
   /** Topic files touched. */
   topics: string[];
   journeyChanged: boolean;
+  /** Watermark preserved: max coversUpToId among tombstoned observations. */
+  maxCoversUpToId?: string;
+  /** Highest observation-id seq among tombstoned observations. */
+  maxSeq?: number;
 }
 
 export interface CostEntry {
@@ -136,6 +140,8 @@ export interface WorkerInput {
 export interface ConsolidationResult {
   topics: string[];
   tombstoneIds: string[];
+  /** Explicitly dropped (superseded) observation ids — tombstoned too. */
+  droppedIds: string[];
   journeyChanged: boolean;
 }
 
@@ -143,8 +149,9 @@ export interface WorkerResult {
   runId: string;
   ok: boolean;
   error?: string;
-  /** Observer output. */
-  observations?: Observation[];
+  /** Observer output: observation CONTENTS (ids/tokenCount are derived by the
+   * orchestrator at commit time — see ids.ts, FR-1.4). */
+  observations?: string[];
   /** Consolidator output. */
   consolidation?: ConsolidationResult;
   costUsd?: number;
@@ -178,9 +185,17 @@ export interface HistorySource {
   } | null;
   /** Estimated total context tokens (for the compact trigger). */
   currentTokens(): number;
+  /** Tokens of history AFTER the given watermark (for "next observer" progress). */
+  unobservedTokens(sinceId: string): number;
   isIdle(): boolean;
   /** Verbatim fresh history since an id, bounded by maxTokens. */
   tailVerbatim(sinceId: string, maxTokens: number): string;
+  /**
+   * Id of the LAST message not included in the newest window of ≤ maxTokens
+   * (the verbatim tail starts after it; FR-3.4). '' when the whole history
+   * fits — the tail covers everything and the observation section is empty.
+   */
+  tailStartIdFor?(maxTokens: number): string;
   /** For gap markers. */
   lastMessageAt(): Date | null;
 }
