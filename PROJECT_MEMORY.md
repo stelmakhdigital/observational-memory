@@ -259,6 +259,11 @@ observational-memory/
   (scoped-tools.ts, path containment, 5 unit-тестов + runner/env-тесты; 130 passed).
   typebox добавлен в peerDependencies (pi бандлит его). Осталось: (1) ручной smoke;
   (2) v0.1.0 тег.
+- 2025-09: packaging для установки через Git (a76501e): pi-манифест `pi.extensions` в
+  package.json (расширение подхватывается автоматически), keyword `pi-package`,
+  typebox → peerDependencies `*` (по докам pi: не бандлить), установка
+  `pi install git:github.com/arkalaust/observational-memory@v0.1.0` или локальный
+  путь; npm-публикации нет (решение пользователя).
 - 2025-09: v2 extractors: ExtractorSpec (ид по умолч. `profile`), роль `extractor` в
   ModelRunner, prompt EXTRACTED_JSON + lenient-парсер, хранение
   `.memory/<session>/extracted/<id>.json`, триггеры: после консолидации (по
