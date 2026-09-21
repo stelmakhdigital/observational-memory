@@ -50,7 +50,10 @@
 ## 5. Тестирование (Verification / Testing)
 - [x] npm run typecheck — чисто
 - [x] npm test — все тесты зелёные (115)
-- [ ] Smoke: установка в pi, /om on, сессия → observations создаются, /om:status, компакция (ручной, в реальном pi)
+- [x] Smoke: установка в pi, /om on, сессия → observations создаются, /om:status, компакция (ручной, в реальном pi)
+      — пройден: 48 наблюдений, 2 консолидации (5 тем), 3 экстракции (profile.json),
+      компакция через OM-блок (summary 21k, firstKeptEntryId), 0 ошибок; cost=0
+      ожидаем (локальный провайдер без ценника)
 
 ## 6. Релиз (PMBOK: Closing + Release)
 - [x] Финальный обзор кода, чистка (7aba3b4: мёртвый export убран, ARCHITECTURE синхронизирован; 115 тестов зелёные)
@@ -84,4 +87,5 @@
 | 2025-09 | a76501e | Packaging для git-install: pi-манифест, keyword pi-package, typebox → peerDeps, packaging-тесты (134 passed) |
 | 2025-09 | f19ac2e | v2: extractors (ExtractorSpec, роль extractor, prompt+парсер, extracted/<id>.json, /om:extract, 149 passed) |
 | 2025-09 | 48926e5 | docs: packaging (git-install) и extractors в PROJECT_MEMORY/roadmap |
-| 2025-09 | v0.1.0  | version bump 0.1.0 + тег v0.1.0 (релиз) |
+| 2025-09 | 806bc1f | Release v0.1.0: version bump 0.1.0 + тег v0.1.0 |
+| 2025-09 | —       | ручной smoke в реальном pi пройден (48 obs, консолидации, экстракторы, OM-компакция); smoke-пороги из конфига убраны |

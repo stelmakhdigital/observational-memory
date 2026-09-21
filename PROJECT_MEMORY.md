@@ -273,3 +273,10 @@ observational-memory/
 - 2025-09: **релиз v0.1.0** — версия в package.json поднята до 0.1.0, тег v0.1.0
   (согласовано с пользователем). Установка: `pi install git:github.com/arkalaust/observational-memory@v0.1.0`.
   Осталось: ручной smoke в живом pi (первый шаг после тега).
+- 2025-09: **ручной smoke пройден** (реальный pi, проект ~/om-smoke, модель
+  qwen3.8-27b-dflash2): 48 наблюдений (13 observer-запусков, все ok), 2
+  консолидации (5 тем + JOURNEY), 3 экстракции (extracted/profile.json — высокий
+  профиль), 1 компакция — OM-блок (21k) как summary c firstKeptEntryId; 0 ошибок;
+  resume сессии восстановил gate/состояние из ledger. Cost $0.000 — ожидаемо:
+  локальный провайдер без ценника (cost записывается только при > 0). Smoke-пороги
+  из ~/.pi/agent/settings.json убраны (производные дефолты + модели qwen).
