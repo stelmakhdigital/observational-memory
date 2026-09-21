@@ -65,7 +65,8 @@
 - [x] Packaging: установка через Git (`pi install git:...`), pi-манифест, без npm-публикации
 - [x] v2: extractors (Mastra-style)
 - [x] v2: early activation (model_select + idle-таймер, chunker minTokens)
-- [ ] v2+: другие адаптеры
+- [x] v2+: embedded-путь для чужих агентов (FileLedgerStore + createOmSession + demo)
+- [ ] v2+: конкретные адаптеры (non-pi агенты)
 
 ## Журнал коммитов
 | Дата | Commit | Содержание |
@@ -92,3 +93,4 @@
 | 2025-09 | 368854d | docs: ручной smoke в реальном pi пройден (48 obs, консолидации, экстракторы, OM-компакция); smoke-пороги из конфига убраны |
 | 2025-09 | 3b2d1cb | v2: early activation (model_select + idle) + fork-seed копирует extracted/ (155 passed); запушено: main + тег v0.1.0 → github.com:stelmakhdigital/observational-memory |
 | 2025-09 | 3982f98 | Release v0.2.0: version bump + тег v0.2.0; pi-установка переключена на git:…@v0.2.0 |
+| 2025-09 | —       | v2+: embedded-интеграция (FileLedgerStore, createOmSession, npm run demo) + quiescent shutdown/compaction, seed по флагу (165 passed) |

@@ -126,6 +126,33 @@ typebox — peerDependency, поставляется самим pi).
 
 Переменные окружения: `OM_PI_BIN` (бинарник pi), `OM_WORKER_TIMEOUT_MS` (таймаут воркера).
 
+## Встраивание в свой агент (без pi)
+
+Ядро агент-независимое: реализуй два шва — `HistorySource` (история твоей сессии)
+и `ModelRunner` (LLM-вызовы: subprocess, in-process SDK, что угодно) — и получай
+всё остальное одним вызовом:
+
+```ts
+import { createOmSession, type HistorySource, type ModelRunner } from
+  '@stelmakhdigital/observational-memory/core';
+
+const session = createOmSession({
+  root: path.join(projectDir, '.memory'), // долгие файлы + ledger.jsonl
+  sessionId: mySessionId,
+  history: myHistory,      // HistorySource
+  runner: myRunner,        // ModelRunner (observer/consolidator/extractor)
+  // config: { chunkTokens, ... } — опционально, валидируется
+});
+session.orchestrator.setEnabled(true);
+// на конце хода: session.orchestrator.onTurnEnd();
+// при компакции:  session.orchestrator.compactBlock().text — твоя новая история
+```
+
+- ledger — `FileLedgerStore` (JSONL, append-only, corrupt-устойчивый), gate/
+  watermark переживают рестарт процесса;
+- ручные триггеры — `forceConsolidate()` / `forceExtract()` / `forceCompact()`;
+- пример без LLM: `npm run demo` (`examples/embedded-demo.ts`).
+
 ## Архитектура
 
 ```
@@ -147,8 +174,9 @@ raw chunks (token-bounded)
 ## Тестирование
 
 ```bash
-npm test          # 155 тестов: unit (core + adapter) + интеграция пайплайна (без LLM)
+npm test          # 165 тестов: unit (core + adapter) + интеграция пайплайна (без LLM)
 npm run typecheck # tsc --noEmit
+npm run demo      # embedded-демо: полный пайплайн в "чужом" агенте, без LLM/pi
 ```
 
 Воркеры в тестах — `MockRunner`/фейковый pi-бинарник, поэтому CI не расходует токены.

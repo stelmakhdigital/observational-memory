@@ -52,13 +52,13 @@ export class MemoryStore implements MemoryRoot {
     return existsSync(this.sessionDir(sessionId));
   }
 
-  seedFrom(parentSessionId: string, sessionId: string): void {
-    if (parentSessionId === sessionId) return;
+  seedFrom(parentSessionId: string, sessionId: string): boolean {
+    if (parentSessionId === sessionId) return false;
     const parentDir = this.sessionDir(parentSessionId);
     const childDir = this.sessionDir(sessionId);
     const flag = path.join(childDir, SEED_FLAG);
     mkdirSync(childDir, { recursive: true });
-    if (existsSync(flag)) return; // one-time seeding (FR-4.4)
+    if (existsSync(flag)) return false; // one-time seeding (FR-4.4)
     if (existsSync(parentDir)) {
       for (const e of readdirSync(parentDir)) {
         if (e === SEED_FLAG || e === '.runs') continue; // skip transient state
@@ -81,6 +81,7 @@ export class MemoryStore implements MemoryRoot {
       }
     }
     writeFileSync(flag, parentSessionId, 'utf8');
+    return true;
   }
 
   listTopics(sessionId: string): TopicSummary[] {

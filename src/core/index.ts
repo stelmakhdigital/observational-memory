@@ -13,6 +13,8 @@ export * from './gap-markers.js';
 export * from './cost.js';
 export * from './worker-output.js';
 export { OmOrchestrator, type OrchestratorDeps } from './orchestrator.js';
+export { createOmSession, type OmSession, type OmSessionOptions } from './session.js';
+export { FileLedgerStore, defaultLedgerFile, type FileLedgerStoreOptions } from './ledger/file-store.js';
 export { renderObserverPrompt } from './prompts/observer.js';
 export { renderConsolidatorPrompt } from './prompts/consolidator.js';
 export { renderExtractorPrompt } from './prompts/extractor.js';

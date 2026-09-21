@@ -110,10 +110,10 @@ export class OmOrchestrator {
   private ensureSeeded(): void {
     if (this.seeded || !this.d.forkParentSessionId) return;
     this.seeded = true;
-    if (!this.d.memory.exists(this.sessionId)) {
-      this.d.memory.seedFrom(this.d.forkParentSessionId, this.sessionId);
-      this.log(`seeded memory from ${this.d.forkParentSessionId}`);
-    }
+    // The seed flag inside seedFrom is the idempotence guard (the session dir
+    // itself may already exist, e.g. the ledger created it — FR-4.4).
+    const did = this.d.memory.seedFrom(this.d.forkParentSessionId, this.sessionId);
+    if (did) this.log(`seeded memory from ${this.d.forkParentSessionId}`);
   }
 
   // ---- clocks ------------------------------------------------------------
@@ -193,6 +193,19 @@ export class OmOrchestrator {
     return this.inFlight.filter((r) => r.role === 'observer').length;
   }
 
+  /**
+   * Track a worker task in inFlight; the entry REMOVES ITSELF when settled so
+   * quiescent drains (shutdown/compaction) terminate even for follow-up runs
+   * spawned while draining.
+   */
+  private trackTask(runId: string, role: Role, startedAt: string, task: Promise<void>): void {
+    const tracked = task.finally(() => {
+      const i = this.inFlight.findIndex((r) => r.runId === runId);
+      if (i !== -1) this.inFlight.splice(i, 1);
+    });
+    this.inFlight.push({ runId, role, startedAt, promise: tracked });
+  }
+
   private pumpObservers(): void {
     // eslint-disable-next-line no-constant-condition
     while (true) {
@@ -223,12 +236,7 @@ export class OmOrchestrator {
         this.pendingChunks.delete(coversUpToId);
       },
     );
-    this.inFlight.push({
-      runId,
-      role: 'observer',
-      startedAt: this.now().toISOString(),
-      promise: task,
-    });
+    this.trackTask(runId, 'observer', this.now().toISOString(), task);
   }
 
   private commitObservations(runId: string, coversUpToId: string, res: WorkerResult): void {
@@ -300,15 +308,12 @@ export class OmOrchestrator {
       },
     };
     const task = this.runWorker(input, (res) => this.commitConsolidation(runId, oldest.ids, res));
-    this.inFlight.push({
-      runId,
-      role: 'consolidator',
-      startedAt: this.now().toISOString(),
-      promise: task.finally(() => {
+    this.trackTask(runId, 'consolidator', this.now().toISOString(),
+      task.finally(() => {
         this.consolidating = false;
         this.emitStatus();
       }),
-    });
+    );
   }
 
   private commitConsolidation(runId: string, allowedIds: string[], res: WorkerResult): void {
@@ -390,15 +395,12 @@ export class OmOrchestrator {
       }
       this.log(`extraction ${runId} (${reason}): saved ${Object.keys(values).length} values`);
     });
-    this.inFlight.push({
-      runId,
-      role: 'extractor',
-      startedAt: this.now().toISOString(),
-      promise: task.finally(() => {
+    this.trackTask(runId, 'extractor', this.now().toISOString(),
+      task.finally(() => {
         this.extracting = false;
         this.emitStatus();
       }),
-    });
+    );
     this.log(`extraction started (${reason})`);
   }
 
@@ -426,7 +428,13 @@ export class OmOrchestrator {
 
   private async runCompaction(): Promise<void> {
     await this.d.runner.drain?.();
-    await Promise.allSettled(this.inFlight.map((r) => r.promise));
+    // Quiescent drain: workers may spawn follow-ups (e.g. post-consolidation
+    // extraction) after the snapshot; loop until nothing is in flight.
+    for (;;) {
+      const inflight = this.inFlight.slice();
+      if (inflight.length === 0) break;
+      await Promise.allSettled(inflight.map((r) => r.promise));
+    }
     this.inFlight = [];
     const block = this.compactBlock();
     this.d.sink.onCompactionBlock(block);
@@ -459,15 +467,12 @@ export class OmOrchestrator {
       },
     };
     const task = this.runWorker(input, (res) => this.commitConsolidation(runId, oldest.ids, res));
-    this.inFlight.push({
-      runId,
-      role: 'consolidator',
-      startedAt: this.now().toISOString(),
-      promise: task.finally(() => {
+    this.trackTask(runId, 'consolidator', this.now().toISOString(),
+      task.finally(() => {
         this.consolidating = false;
         this.emitStatus();
       }),
-    });
+    );
   }
 
   compactBlock(): CompactionBlock {
@@ -634,7 +639,13 @@ export class OmOrchestrator {
   async shutdown(): Promise<void> {
     if (this.earlyTimer) clearTimeout(this.earlyTimer);
     this.earlyTimer = null;
-    await Promise.allSettled(this.inFlight.map((r) => r.promise));
+    // Quiescent drain (see runCompaction): follow-up workers spawned while
+    // draining must be awaited too.
+    for (;;) {
+      const inflight = this.inFlight.slice();
+      if (inflight.length === 0) break;
+      await Promise.allSettled(inflight.map((r) => r.promise));
+    }
     this.inFlight = [];
     await this.d.runner.drain?.();
   }

@@ -297,6 +297,14 @@ observational-memory/
   `pi install git:github.com/stelmakhdigital/observational-memory@v0.1.0`.
   Тег v0.1.0 стоит на 806bc1f (до early activation); early activation + fork-seed-fix
   (3b2d1cb) пойдут в v0.2.0.
+- 2025-09: v2+ embedded-интеграция: `FileLedgerStore` (JSONL append-only, corrupt-
+  устойчивый, append не крэшит хост — NFR-1) + `createOmSession()` (конвейер
+  root/sessionId/history/runner → оркестратор+память+ledger) + `examples/embedded-demo.ts`
+  (`npm run demo`, tsc build в dist/). Заодно починено: (a) seed-триггер теперь по
+  seed-флагу, а не по exists(dir) (FileLedgerStore заранее создавал dir — seed
+  пропусcalся); seedFrom → boolean; (b) quiescent shutdown/compaction: follow-up
+  воркеры (post-consolidation extraction) дожидаются (inFlight-записи удаляются
+  при завершении, trackTask). 165 passed.
 - 2025-09: **v0.2.0** (тег 3982f98): early activation + fork-seed fix в релизе;
   установка в pi переключена с локального пути на
   `git:github.com/stelmakhdigital/observational-memory@v0.2.0` (settings.json,

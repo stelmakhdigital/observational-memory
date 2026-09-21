@@ -300,8 +300,8 @@ export interface TopicSummary {
 export interface MemoryRoot {
   sessionDir(sessionId: string): string;
   exists(sessionId: string): boolean;
-  /** One-time seed from a parent session (fork/clone). */
-  seedFrom(parentSessionId: string, sessionId: string): void;
+  /** One-time seed from a parent session (fork/clone); true when actually seeded. */
+  seedFrom(parentSessionId: string, sessionId: string): boolean;
   listTopics(sessionId: string): TopicSummary[];
   readJourney(sessionId: string): string;
   /** Orchestrator-owned INDEX.md re-render from topic front-matter. */

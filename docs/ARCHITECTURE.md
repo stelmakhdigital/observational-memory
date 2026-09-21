@@ -278,10 +278,11 @@ onAgentEnd (idle):
 package.json            name: @stelmakhdigital/observational-memory, exports ./core ./adapters/pi
 tsconfig.json  vitest.config.ts
 src/core/types.ts  config.ts  tokens.ts  chunker.ts  ids.ts  worker-output.ts
-src/core/ledger/{index,pool,progress,render,serialize}.ts
-src/core/memory-store.ts  gap-markers.ts  cost.ts
+src/core/ledger/{index,pool,progress,render,serialize,file-store}.ts
+src/core/memory-store.ts  gap-markers.ts  cost.ts  session.ts (createOmSession)
 src/core/prompts/{observer,consolidator,extractor}.ts
 src/core/orchestrator.ts  index.ts (public API)
+examples/embedded-demo.ts  (npm run demo: полный пайплайн без pi/LLM)
 src/adapters/pi/{index.ts,history.ts,ledger.ts,runner.ts,worker.ts,scoped-tools.ts,config.ts,types.ts}
 tests/unit/*  tests/integration/*  tests/fixtures/*
 docs/{REQUIREMENTS,ARCHITECTURE}.md  README.md

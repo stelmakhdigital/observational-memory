@@ -21,7 +21,9 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "demo": "npm run build && node dist/examples/embedded-demo.js"
   },
   "peerDependencies": {
     "typebox": "*"
