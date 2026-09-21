@@ -162,6 +162,10 @@ export default function observationalMemory(pi: PiApi): OmExtension {
     const r = track(ctx);
     await r.orch.onAgentEnd();
   });
+  pi.on('model_select', (_e, ctx) => {
+    // Early activation (v2): the prompt cache is invalidated anyway.
+    track(ctx).orch.onModelChange();
+  });
   pi.on('session_before_compact', (event, ctx) => {
     const r = track(ctx);
     if (!r.orch.isEnabled()) return; // default pi compaction when OM is off

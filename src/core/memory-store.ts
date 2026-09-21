@@ -16,6 +16,7 @@
 import {
   constants as fsConstants,
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -60,9 +61,18 @@ export class MemoryStore implements MemoryRoot {
     if (existsSync(flag)) return; // one-time seeding (FR-4.4)
     if (existsSync(parentDir)) {
       for (const e of readdirSync(parentDir)) {
-        if (e === SEED_FLAG || e === '.runs' || e === 'extracted') continue; // skip transient state (extracted/ not seeded in v2)
+        if (e === SEED_FLAG || e === '.runs') continue; // skip transient state
         const src = path.join(parentDir, e);
         const dst = path.join(childDir, e);
+        if (e === 'extracted' && existsSync(src)) {
+          // structured extractor values are part of durable memory (v2+)
+          try {
+            cpSync(src, dst, { recursive: true, force: false });
+          } catch {
+            /* seed is best-effort (NFR-1) */
+          }
+          continue;
+        }
         try {
           copyFileSync(src, dst, fsConstants.COPYFILE_EXCL);
         } catch {

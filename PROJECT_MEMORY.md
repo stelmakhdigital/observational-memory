@@ -280,3 +280,13 @@ observational-memory/
   resume сессии восстановил gate/состояние из ledger. Cost $0.000 — ожидаемо:
   локальный провайдер без ценника (cost записывается только при > 0). Smoke-пороги
   из ~/.pi/agent/settings.json убраны (производные дефолты + модели qwen).
+- 2025-09: v2 early activation + фикс fork-seed: (1) `earlyActivation {enabled,
+  idleMs, minUnobservedTokens}` — досрочное наблюдение при `model_select` (pi-событие
+  → orchestrator.onModelChange) и при idle (unref-таймер после turn_end);
+  chunker.next(..., {minTokens}) — чанк ниже порога; (2) seedFrom теперь
+  рекурсивно копирует `extracted/` (cpSync). 155 passed.
+- 2025-09: репо пользователя: git@github.com:stelmakhdigital/observational-memory.git
+  (remote origin добавлен; push — вручную пользователем. SSH на этой машине к
+  github.com:22 рвётся после KEX — DPI; работает через ssh.github.com:443, см.
+  ~/.ssh/config). Пакет переименован в @stelmakhdigital/observational-memory,
+  URL установки в README/доках обновлён.

@@ -51,8 +51,8 @@ export class MockHistory implements HistorySource {
     this.lastAt = new Date();
   }
 
-  nextChunk(since: { coversUpToId: string; observedTokens: number }) {
-    return this.chunker.next(this.messages, since);
+  nextChunk(since: { coversUpToId: string; observedTokens: number }, opts?: { minTokens?: number }) {
+    return this.chunker.next(this.messages, since, opts);
   }
   currentTokens(): number {
     return this.contextTokens;

@@ -34,6 +34,9 @@ OM решает проблему *context rot* и *context waste* в длинн�
   профиль и предпочтения пользователя), обновляются после консолидации по
   только что консолидированным наблюдениям; хранение `.memory/<session>/extracted/<id>.json`.
   Настраиваются/отключаются в `extractors`, форсируются командой `/om:extract`.
+- **Early activation (v2)** — наблюдение «раньше порога» при смене модели
+  (`model_select`, промпт-кэш всё равно сброшен) и при тишине пользователя ≥ idleMs
+  (буфер наполняется, пока мы ждём). Настраивается в `earlyActivation`.
 - **Безопасные воркеры** — observer без тулов, consolidator с доступом только к
   своему session-каталогу памяти.
 - **Gate по умолчанию OFF** — расширение невидимо, пока не включить (`/om on`).
@@ -115,6 +118,7 @@ typebox — peerDependency, поставляется самим pi).
     "passive": false,              // power-user: только ручные команды (для теста /tree)
     "debugLog": false,
     "gapMarkers": { "enabled": true, "thresholdMs": 600000 },
+    "earlyActivation": { "enabled": true, "idleMs": 300000, "minUnobservedTokens": 300 },
     "piBinary": "pi"               // бинарник для воркеров (или env OM_PI_BIN)
   }
 }
@@ -143,7 +147,7 @@ raw chunks (token-bounded)
 ## Тестирование
 
 ```bash
-npm test          # 149 тестов: unit (core + adapter) + интеграция пайплайна (без LLM)
+npm test          # 155 тестов: unit (core + adapter) + интеграция пайплайна (без LLM)
 npm run typecheck # tsc --noEmit
 ```
 

@@ -200,8 +200,9 @@ export interface HistorySource {
   /**
    * Next token-bounded slice of history since the watermark, or null when
    * fewer than chunkTokens of new history. Slices never split a message.
+   * opts.minTokens (early activation) lowers the threshold.
    */
-  nextChunk(since: Watermark): {
+  nextChunk(since: Watermark, opts?: { minTokens?: number }): {
     text: string;
     overlapContext: string;
     coversUpToId: string;

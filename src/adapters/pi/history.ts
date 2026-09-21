@@ -89,8 +89,8 @@ export class PiHistorySource implements HistorySource {
     return idx === -1 ? 0 : idx + 1;
   }
 
-  nextChunk(since: Watermark) {
-    return this.chunker.next(this.messages(), since);
+  nextChunk(since: Watermark, opts?: { minTokens?: number }) {
+    return this.chunker.next(this.messages(), since, opts);
   }
 
   currentTokens(): number {

@@ -49,9 +49,11 @@ export class MessageChunker {
   /**
    * @param messages full visible history in order (ascending ids).
    * @param since watermark; coversUpToId '' means "from the beginning".
+   * @param opts.minTokens lower the threshold for early activation (v2): a
+   *   slice is produced from fewer new tokens than chunkTokens.
    */
-  next(messages: readonly OmMessage[], since: Watermark): Chunk | null {
-    const { chunkTokens } = this.opts;
+  next(messages: readonly OmMessage[], since: Watermark, opts?: { minTokens?: number }): Chunk | null {
+    const chunkTokens = Math.min(this.opts.chunkTokens, opts?.minTokens ?? this.opts.chunkTokens);
     const startIdx =
       since.coversUpToId === ''
         ? 0

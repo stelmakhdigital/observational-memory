@@ -71,6 +71,7 @@ export class OmOrchestrator {
   private extracting = false;
   private lastGapMarkedFor: Date | null = null;
   private compactedForTokens = 0;
+  private earlyTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly d: OrchestratorDeps) {
     this.cfg = d.config;
@@ -121,6 +122,57 @@ export class OmOrchestrator {
     if (!this.enabled || this.cfg.passive) return;
     this.pumpObservers();
     this.maybeConsolidate();
+    this.scheduleEarlyIdleCheck();
+  }
+
+  /**
+   * Early activation (v2): the provider/model was switched — the prompt cache
+   * is invalidated anyway, so observe pending history now if enough of it
+   * exists (even below the regular chunk threshold).
+   */
+  onModelChange(): void {
+    if (!this.enabled || this.cfg.passive) return;
+    if (this.cfg.earlyActivation.enabled) this.earlyPump();
+  }
+
+  // ---- early activation (v2) -------------------------------------------------
+
+  private scheduleEarlyIdleCheck(): void {
+    if (!this.cfg.earlyActivation.enabled) return;
+    if (this.earlyTimer) clearTimeout(this.earlyTimer);
+    this.earlyTimer = setTimeout(() => {
+      this.earlyTimer = null;
+      this.maybeEarlyIdle();
+    }, this.cfg.earlyActivation.idleMs);
+    // don't keep the process alive for the early check
+    (this.earlyTimer as { unref?: () => void }).unref?.();
+  }
+
+  private maybeEarlyIdle(): void {
+    if (!this.enabled || this.cfg.passive) return;
+    try {
+      if (!this.d.history.isIdle()) return;
+      const unobserved = this.d.history.unobservedTokens(this.watermark().coversUpToId);
+      if (unobserved < this.cfg.earlyActivation.minUnobservedTokens) return;
+      this.log(`early activation (idle, ${unobserved} unobserved tokens)`);
+      this.earlyPump();
+    } catch (e) {
+      this.log(`early idle check failed: ${String(e)}`);
+    }
+  }
+
+  /** One early observer slice with a lowered token threshold. */
+  private earlyPump(): void {
+    if (this.observersInFlight() >= this.cfg.observerConcurrency) return;
+    const wm = this.watermark();
+    const chunk = this.d.history.nextChunk(
+      { coversUpToId: wm.coversUpToId, observedTokens: 0 },
+      { minTokens: this.cfg.earlyActivation.minUnobservedTokens },
+    );
+    if (!chunk) return;
+    if (this.pendingChunks.has(chunk.coversUpToId)) return;
+    this.log(`early chunk: ${chunk.tokens} tokens up to ${chunk.coversUpToId}`);
+    this.startObserver(chunk.coversUpToId, chunk.text, chunk.overlapContext);
   }
 
   async onAgentEnd(): Promise<void> {
@@ -580,6 +632,8 @@ export class OmOrchestrator {
 
   /** Wait for all in-flight workers (graceful shutdown / pre-compaction). */
   async shutdown(): Promise<void> {
+    if (this.earlyTimer) clearTimeout(this.earlyTimer);
+    this.earlyTimer = null;
     await Promise.allSettled(this.inFlight.map((r) => r.promise));
     this.inFlight = [];
     await this.d.runner.drain?.();

@@ -14,6 +14,27 @@ const chunkerOverlap = new MessageChunker({
 });
 
 describe('MessageChunker.next', () => {
+  it('minTokens (early activation) lowers the threshold', () => {
+    const m = msgs(
+      ['a', 'aaaa'], // 4
+      ['b', 'bbbb'], // 4
+      ['c', 'cccc'], // 4
+    );
+    // full threshold: 10 -> all three messages (4+4 < 10)
+    expect(chunker.next(m, { coversUpToId: '', observedTokens: 0 })?.coversUpToId).toBe('c');
+    // minTokens=4 -> single first message
+    const early = chunker.next(m, { coversUpToId: '', observedTokens: 0 }, { minTokens: 4 });
+    expect(early?.coversUpToId).toBe('a');
+    expect(early?.tokens).toBe(4);
+    // minTokens larger than chunkTokens is clamped to chunkTokens
+    const clamped = chunker.next(m, { coversUpToId: '', observedTokens: 0 }, { minTokens: 100 });
+    expect(clamped?.coversUpToId).toBe('c');
+  });
+
+  it('minTokens still returns null when fresh history is empty', () => {
+    expect(chunker.next([], { coversUpToId: '', observedTokens: 0 }, { minTokens: 1 })).toBeNull();
+  });
+
   it('returns null when fresh history < chunkTokens', () => {
     const m = msgs(['m1', 'abcd'], ['m2', 'efgh']);
     expect(chunker.next(m, { coversUpToId: '', observedTokens: 0 })).toBeNull();

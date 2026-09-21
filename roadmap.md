@@ -64,7 +64,8 @@
 - [x] v1.1: worker scope-hardening (scoped tools, --no-builtin-tools, worker-расширение)
 - [x] Packaging: установка через Git (`pi install git:...`), pi-манифест, без npm-публикации
 - [x] v2: extractors (Mastra-style)
-- [ ] v2+: early activation, другие адаптеры
+- [x] v2: early activation (model_select + idle-таймер, chunker minTokens)
+- [ ] v2+: другие адаптеры
 
 ## Журнал коммитов
 | Дата | Commit | Содержание |
@@ -88,4 +89,5 @@
 | 2025-09 | f19ac2e | v2: extractors (ExtractorSpec, роль extractor, prompt+парсер, extracted/<id>.json, /om:extract, 149 passed) |
 | 2025-09 | 48926e5 | docs: packaging (git-install) и extractors в PROJECT_MEMORY/roadmap |
 | 2025-09 | 806bc1f | Release v0.1.0: version bump 0.1.0 + тег v0.1.0 |
-| 2025-09 | —       | ручной smoke в реальном pi пройден (48 obs, консолидации, экстракторы, OM-компакция); smoke-пороги из конфига убраны |
+| 2025-09 | 368854d | docs: ручной smoke в реальном pi пройден (48 obs, консолидации, экстракторы, OM-компакция); smoke-пороги из конфига убраны |
+| 2025-09 | —       | v2: early activation (model_select + idle) + fork-seed копирует extracted/ (155 passed) |

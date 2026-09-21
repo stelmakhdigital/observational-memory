@@ -202,6 +202,17 @@ onAgentEnd (idle):
   `parseExtractorOutput`; значения складываются в `.memory/<session>/extracted/<id>.json`.
 - Cost экстрактора учитывается в общем cost (byRole.extractor); статус: extractedCount.
 
+### 4.5.2 Early activation (v2, Mastra-style)
+
+- Конфиг `earlyActivation { enabled, idleMs, minUnobservedTokens }` (дефолт: true / 5 мин / 300).
+- Триггеры: (1) `model_select` (адаптер → `orchestrator.onModelChange()`) — смена
+  модели/провайдера сбрасывает промпт-кэш, поэтому накопленная ненаблюдаемая история
+  (≥ minUnobservedTokens) обрабатывается досрочно; (2) idle: после `turn_end`
+  ставится таймер idleMs (unref), по срабатывании — если сессия в простое и
+  ненаблюдаемых токенов ≥ min — один early-чанк.
+- Механика: `chunker.next(..., { minTokens })` — тот же слайс, но с пониженным
+  порогом; observer обычный (watermark/pendingChunks-dedup/ретраи — без изменений).
+
 ### 4.6 Gap markers (FR-8)
 
 - `GapMarkerDetector.check(lastAt, now, thresholdMs)` → опциональный GapMarker.
@@ -220,7 +231,8 @@ onAgentEnd (idle):
 | pi-событие | Действие адаптера |
 |---|---|
 | `session_start` | инициализация (session id, fork-parent, seed памяти, чтение om.enabled из ledger) |
-| `turn_end` | `orchestrator.onTurnEnd()` |
+| `turn_end` | `orchestrator.onTurnEnd()` + планирование idle early-activation |
+| `model_select` | `orchestrator.onModelChange()` (early activation, v2) |
 | `agent_end` | `orchestrator.onAgentEnd()` |
 | `session_shutdown` | `orchestrator.shutdown()` (drain) |
 | (пер-сессионное состояние) | gate off → все вызовы no-op (FR-7.2) |

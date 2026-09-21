@@ -17,6 +17,19 @@ export interface GapMarkersConfig {
   thresholdMs: number;
 }
 
+/**
+ * Early activation (v2, Mastra-style): observe new history before the regular
+ * chunk threshold when the situation changes — provider/model switch (prompt
+ * cache is invalidated anyway) or user idle (buffer fills while waiting).
+ */
+export interface EarlyActivationConfig {
+  enabled: boolean;
+  /** Milliseconds of user silence before an idle early-observation. */
+  idleMs: number;
+  /** Minimum unobserved tokens for an early slice (below chunkTokens). */
+  minUnobservedTokens: number;
+}
+
 export interface OmConfig {
   /** New-history tokens per observer chunk (FR-1.1). */
   chunkTokens: number;
@@ -45,6 +58,7 @@ export interface OmConfig {
   passive: boolean;
   debugLog: boolean;
   gapMarkers: GapMarkersConfig;
+  earlyActivation: EarlyActivationConfig;
 }
 
 export const DEFAULT_CONFIG: OmConfig = {
@@ -63,6 +77,7 @@ export const DEFAULT_CONFIG: OmConfig = {
   passive: false,
   debugLog: false,
   gapMarkers: { enabled: true, thresholdMs: 10 * 60 * 1000 },
+  earlyActivation: { enabled: true, idleMs: 5 * 60 * 1000, minUnobservedTokens: 300 },
   extractors: [
     {
       id: 'profile',
@@ -109,6 +124,9 @@ export function validateConfig(c: OmConfig): void {
   if (!c.models?.observer?.id || !c.models?.consolidator?.id)
     problems.push('models.observer.id and models.consolidator.id are required');
   if (c.gapMarkers.thresholdMs <= 0) problems.push('gapMarkers.thresholdMs must be > 0');
+  if (c.earlyActivation.idleMs <= 0) problems.push('earlyActivation.idleMs must be > 0');
+  if (c.earlyActivation.minUnobservedTokens <= 0)
+    problems.push('earlyActivation.minUnobservedTokens must be > 0');
   if (!Array.isArray(c.extractors)) problems.push('extractors must be an array');
   else {
     const ids = new Set<string>();

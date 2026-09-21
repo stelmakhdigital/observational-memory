@@ -127,7 +127,7 @@ describe('memory-store extracted values', () => {
     expect(store.listExtracted(S)).toEqual(['profile']);
   });
 
-  it('seedFrom copies topic files but skips extracted/', () => {
+  it('seedFrom copies topic files AND extracted/ (durable memory)', () => {
     const store = new MemoryStore(dir);
     // parent: a topic file + a stored extractor value
     const parentDir = path.join(dir, 'sess-parent');
@@ -142,8 +142,9 @@ describe('memory-store extracted values', () => {
     store.seedFrom('sess-parent', 'sess-child');
 
     expect(existsSync(path.join(dir, 'sess-child', 'topic.md'))).toBe(true);
-    // extracted/ was not seeded (v2 limitation, documented)
-    expect(store.listExtracted('sess-child')).toEqual([]);
+    // extracted/ is seeded now (v2+) — forked sessions keep structured memory
+    expect(store.loadExtracted('sess-child', 'profile')).toEqual({ a: 1 });
+    expect(store.listExtracted('sess-child')).toEqual(['profile']);
   });
 });
 
