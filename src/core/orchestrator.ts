@@ -304,6 +304,7 @@ export class OmOrchestrator {
       data: { id: gapMarkerId(this.now(), seq), at, humanDuration: gap.humanDuration, ms: gap.ms },
       at,
     });
+    this.d.sink.onGapMarker?.({ at, humanDuration: gap.humanDuration, ms: gap.ms });
     this.emitStatus();
   }
 
@@ -356,20 +357,29 @@ export class OmOrchestrator {
   }
 
   compactBlock(): CompactionBlock {
+    return this.compactionPlan().block;
+  }
+
+  /**
+   * Compaction plan (FR-3): the rendered block + the tail boundary id (last
+   * message NOT included in the verbatim tail; '' when the tail covers
+   * everything). Adapters use the boundary for e.g. firstKeptEntryId.
+   */
+  compactionPlan(): { block: CompactionBlock; tailBoundaryId: string } {
     const pool = this.pool();
     const prog = this.watermark();
-    const tailStart = this.d.history.tailStartIdFor?.(this.cfg.tailTokens) ?? prog.coversUpToId;
-    const observations = selectBeforeTail(pool.observations, tailStart === '' ? '' : tailStart);
+    const tailBoundaryId = this.d.history.tailStartIdFor?.(this.cfg.tailTokens) ?? prog.coversUpToId;
+    const observations = selectBeforeTail(pool.observations, tailBoundaryId);
     const memoryMap = renderMemoryMap(this.d.memory.listTopics(this.sessionId));
     const journey = this.d.memory.readJourney(this.sessionId);
-    const verbatimTail = this.d.history.tailVerbatim(tailStart, this.cfg.tailTokens);
+    const verbatimTail = this.d.history.tailVerbatim(tailBoundaryId, this.cfg.tailTokens);
     const gaps = this.d.ledger.read<'om.gap-marker'>('om.gap-marker').map((e) => ({
       at: new Date(e.at),
       lastAt: new Date(0),
       ms: e.data.ms,
       humanDuration: e.data.humanDuration,
     }));
-    return renderCompactionBlock({
+    const block = renderCompactionBlock({
       observations,
       memoryMap,
       journey,
@@ -377,6 +387,7 @@ export class OmOrchestrator {
       gapMarkers: renderGapMarkers(gaps),
       generatedAt: this.now().toISOString(),
     });
+    return { block, tailBoundaryId };
   }
 
   // ---- shared reads ----------------------------------------------------------

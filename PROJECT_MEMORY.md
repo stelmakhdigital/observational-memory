@@ -235,5 +235,16 @@ observational-memory/
   (maxCoversUpToId/maxSeq); tail boundary = последнее сообщение НЕ в хвосте,
   '' = хвост покрывает всё (наблюдения не рендерятся).
   Тестов: 88 passed (10 файлов, вкл. интеграцию пайплайна на MockRunner).
-- Следующий шаг: Sprint 7 — adapter pi: config/history/ledger/UI/commands
-  (+ спайки S1/S2 по pi API: compact-инъекция, appendEntry при /tree).
+- 2025-09: Sprint 7 выполнен: adapter pi — loadPiAdapterConfig (settings.json global+project,
+  env OM_PI_BIN/OM_WORKER_TIMEOUT_MS), PiHistorySource (entry id = uuidv7, messageText),
+  PiLedgerStore (pi.appendEntry('om', …), payloadOk-валидация), PiSubprocessRunner
+  (pi -p --mode json --model, parsePiJsonl: text+cost.total, timeout → finish сразу,
+  drain), index.ts (session_start/turn_end/agent_end/session_before_compact/
+  session_shutdown, команды /om /om:status /om:compact /om:consolidate, UI setStatus,
+  gap-markers → pi.sendMessage hidden). Спайки: S1 — session_before_compact
+  возвращает {compaction:{summary, firstKeptEntryId (tail boundary + 1), tokensBefore}};
+  S2 — custom entries branch-local, не в LLM-контексте, переживают resume.
+  Известное ограничение v1: воркеры с дефолтным набором тулов (scope-hardening — v1.1).
+  Тестов: 111 passed (14 файлов).
+- Следующий шаг: Sprint 8 — README + docs (installation/config/usage) + финальная
+  полировка; затем smoke в реальном pi.

@@ -43,7 +43,7 @@
 - [x] Core: memory-store (+ unit-тесты)
 - [x] Core: gap-markers (+ unit-тесты)
 - [x] Core: prompts + cost (+ тесты) — prompts + worker-output parser готовы и протестированы
-- [ ] Adapter pi: events/session/runner/commands/ui
+- [x] Adapter pi: events/session/runner/commands/ui (спайки S1/S2 выполнены: session_before_compact → OM-блок как summary; appendEntry — branch-local, вне LLM-контекста)
 - [x] Интеграционные тесты пайплайна (mock runner)
 - [ ] README.md + docs (installation, configuration, usage)
 
@@ -71,4 +71,5 @@
 | 2025-09 | 1748fb4 | Sprint 3: ledger (pool/progress/render/serialize) + unit-тесты (45 passed) |
 | 2025-09 | 21eedbb | Sprint 4: memory-store + gap-markers + cost + unit-тесты (64 passed) |
 | 2025-09 | 0b86968 | Sprint 5: prompts (observer/consolidator) + worker-output parser + тесты (77 passed) |
-| 2025-09 | —       | Sprint 6: orchestrator + интеграционные тесты пайплайна (88 passed) |
+| 2025-09 | 95dbb6b | Sprint 6: orchestrator + интеграционные тесты пайплайна (88 passed) |
+| 2025-09 | —       | Sprint 7: adapter pi (config/history/ledger/runner/index) + unit-тесты (111 passed) |

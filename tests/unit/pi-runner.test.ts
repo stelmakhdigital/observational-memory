@@ -1,0 +1,112 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { PiSubprocessRunner, parsePiJsonl } from '../../src/adapters/pi/runner.js';
+
+let dir: string;
+let fakePi: string;
+
+// Fake pi binary: emits a JSONL event stream; role is detected from the prompt.
+const fakeScript = `
+const args = process.argv.slice(2);
+const prompt = args[args.indexOf('--') + 1] ?? '';
+const isObserver = prompt.includes('OBSERVER');
+const lines = [];
+lines.push(JSON.stringify({ type: 'session', version: 3, id: 'w1', timestamp: 't', cwd: '.' }));
+lines.push(JSON.stringify({ type: 'agent_start' }));
+lines.push(JSON.stringify({ type: 'message_update', usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0, total: 0.003 } } }));
+const text = isObserver
+  ? 'OBSERVATIONS\\n- fake obs 1\\n- fake obs 2\\nEND_OBSERVATIONS'
+  : 'CONSOLIDATION_REPORT\\ntopics: a.md, b.md\\njourney_changed: true\\nconsumed: om-1, om-2\\ndropped: none\\nEND_CONSOLIDATION_REPORT';
+lines.push(JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text }] } }));
+lines.push(JSON.stringify({ type: 'agent_end', messages: [] }));
+process.stdout.write(lines.join('\\n') + '\\n');
+`;
+
+beforeEach(() => {
+  dir = mkdtempSync(path.join(tmpdir(), 'om-runner-'));
+  writeFileSync(path.join(dir, 'fake-pi.mjs'), fakeScript);
+  fakePi = path.join(dir, 'fake-pi.sh');
+  writeFileSync(fakePi, `#!/bin/sh\nexec node ${path.join(dir, 'fake-pi.mjs')} "$@"\n`);
+  chmodSync(fakePi, 0o755);
+});
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+const makeRunner = () =>
+  new PiSubprocessRunner({
+    piBinary: fakePi,
+    cwd: dir,
+    observerModel: { id: 'test-model' },
+    consolidatorModel: { id: 'test-model' },
+    timeoutMs: 15_000,
+  });
+
+describe('parsePiJsonl', () => {
+  it('extracts assistant text and cumulative cost', () => {
+    const out = parsePiJsonl(
+      [
+        JSON.stringify({ type: 'message_update', usage: { cost: { total: 0.001 } } }),
+        JSON.stringify({ type: 'message_update', usage: { cost: { total: 0.003 } } }),
+        JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] } }),
+        'not json',
+      ].join('\n'),
+    );
+    expect(out.text).toBe('hello');
+    expect(out.costUsd).toBe(0.003);
+  });
+});
+
+describe('PiSubprocessRunner', () => {
+  it('runs an observer subprocess and parses observations + cost', async () => {
+    const r = await makeRunner().run('observer', {
+      runId: 'run-1',
+      role: 'observer',
+      chunk: { text: 'history', overlapContext: '', coversUpToId: 'm1' },
+    });
+    expect(r.ok).toBe(true);
+    expect(r.observations).toEqual(['fake obs 1', 'fake obs 2']);
+    expect(r.costUsd).toBe(0.003);
+  });
+
+  it('runs a consolidator subprocess and parses the report', async () => {
+    const r = await makeRunner().run('consolidator', {
+      runId: 'run-2',
+      role: 'consolidator',
+      pool: { observations: [], sessionDir: dir, journey: '' },
+    });
+    expect(r.ok).toBe(true);
+    expect(r.consolidation).toEqual({
+      topics: ['a.md', 'b.md'],
+      tombstoneIds: ['om-1', 'om-2'],
+      droppedIds: [],
+      journeyChanged: true,
+    });
+  });
+
+  it('fails cleanly when the binary does not exist', async () => {
+    const r = await new PiSubprocessRunner({
+      piBinary: path.join(dir, 'nope'),
+      cwd: dir,
+      observerModel: { id: 'x' },
+      consolidatorModel: { id: 'x' },
+    }).run('observer', { runId: 'r', role: 'observer', chunk: { text: 'x', overlapContext: '', coversUpToId: 'm' } });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBeTruthy();
+  });
+
+  it('times out a hung worker', async () => {
+    const hang = path.join(dir, 'hang.sh');
+    writeFileSync(hang, '#!/bin/sh\nsleep 30\n');
+    chmodSync(hang, 0o755);
+    const r = await new PiSubprocessRunner({
+      piBinary: hang,
+      cwd: dir,
+      observerModel: { id: 'x' },
+      consolidatorModel: { id: 'x' },
+      timeoutMs: 300,
+    }).run('observer', { runId: 'r', role: 'observer', chunk: { text: 'x', overlapContext: '', coversUpToId: 'm' } });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('timed out');
+  });
+});

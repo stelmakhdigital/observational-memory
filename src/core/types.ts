@@ -243,6 +243,8 @@ export interface EventSink {
   onRunStarted(run: RunInfo): void;
   onRunFinished(run: RunInfo, r: WorkerResult): void;
   onError(e: OmError): void;
+  /** A temporal gap was marked (FR-8); adapters may surface it in-context. */
+  onGapMarker?(gap: { at: string; humanDuration: string; ms: number }): void;
 }
 
 export class OmError extends Error {
