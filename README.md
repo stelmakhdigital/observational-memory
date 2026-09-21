@@ -55,10 +55,10 @@ npm test            # vitest (без LLM)
 подхватывается автоматически):
 
 ```bash
-pi install git:github.com/arkalaust/observational-memory@v0.1.0   # тег
+pi install git:github.com/stelmakhdigital/observational-memory@v0.1.0   # тег
 pi install /абсолютный/путь/к/observational-memory               # локальный каталог
 pi -e /абсолютный/путь/к/observational-memory                    # один раз, без установки
-pi remove git:github.com/arkalaust/observational-memory          # удалить
+pi remove git:github.com/stelmakhdigital/observational-memory          # удалить
 ```
 
 pi клонирует репозиторий и запускает `npm install` в клоне (runtime-зависимостей нет;

@@ -1,4 +1,4 @@
-# ARCHITECTURE — `@arkalaust/observational-memory`
+# ARCHITECTURE — `@stelmakhdigital/observational-memory`
 
 Версия 1.0 · Фаза: Planning · Требования: `docs/REQUIREMENTS.md` (FR-*)
 
@@ -263,7 +263,7 @@ onAgentEnd (idle):
 ## 6. Файловый лэйаут (цель)
 
 ```
-package.json            name: @arkalaust/observational-memory, exports ./core ./adapters/pi
+package.json            name: @stelmakhdigital/observational-memory, exports ./core ./adapters/pi
 tsconfig.json  vitest.config.ts
 src/core/types.ts  config.ts  tokens.ts  chunker.ts  ids.ts  worker-output.ts
 src/core/ledger/{index,pool,progress,render,serialize}.ts

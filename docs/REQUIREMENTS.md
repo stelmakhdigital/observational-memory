@@ -1,4 +1,4 @@
-# REQUIREMENTS — Observational Memory (`@arkalaust/observational-memory`)
+# REQUIREMENTS — Observational Memory (`@stelmakhdigital/observational-memory`)
 
 Версия 1.0 · Дата: 2025-09 · Статус: принято (фаза Discovery закрыта)
 
