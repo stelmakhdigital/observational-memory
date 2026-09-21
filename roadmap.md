@@ -29,8 +29,8 @@
 - [x] Ядро: tokens (token estimation) + chunker (token-bounded slices)
 - [x] Ядро: ledger (append-only pool, watermarks/coversUpToId, projection, deterministic render)
 - [ ] Ядро: orchestrator (observer clock, consolidator clock, compaction, concurrency, idle-wait)
-- [ ] Ядро: memory-store (topic files, INDEX.md, JOURNEY.md, fork-seed)
-- [ ] Ядро: gap-markers (v1: генерация меток временных пауз, якоря для observer'а)
+- [x] Ядро: memory-store (topic files, INDEX.md, JOURNEY.md, fork-seed)
+- [x] Ядро: gap-markers (v1: генерация меток временных пауз, якоря для observer'а)
 - [ ] Ядро: prompts (observer / consolidator) + cost accounting
 - [ ] Adapter pi: входные события → оркестратор; ledger через pi.appendEntry
 - [ ] Adapter pi: ModelRunner через headless subprocess pi
@@ -40,9 +40,9 @@
 - [x] Core: config + types + tokens + chunker (+ unit-тесты)
 - [x] Core: ledger (+ unit-тесты)
 - [ ] Core: orchestrator (+ unit-тесты с mock-ModelRunner)
-- [ ] Core: memory-store (+ unit-тесты)
-- [ ] Core: gap-markers (+ unit-тесты)
-- [ ] Core: prompts + cost (+ тесты)
+- [x] Core: memory-store (+ unit-тесты)
+- [x] Core: gap-markers (+ unit-тесты)
+- [ ] Core: prompts + cost (+ тесты) — cost.ts готов и протестирован; prompts — со спринтом 5
 - [ ] Adapter pi: events/session/runner/commands/ui
 - [ ] Интеграционные тесты пайплайна (mock runner)
 - [ ] README.md + docs (installation, configuration, usage)
@@ -68,4 +68,5 @@
 | 2025-09 | d225aee | Planning: архитектура (docs/ARCHITECTURE.md) |
 | 2025-09 | a4593cb | Sprint 1: skeleton пакета + core types/config/ids + unit-тесты (12 passed) |
 | 2025-09 | ca5532e | Sprint 2: tokens + chunker + unit-тесты (26 passed) |
-| 2025-09 | —       | Sprint 3: ledger (pool/progress/render/serialize) + unit-тесты (45 passed) |
+| 2025-09 | 1748fb4 | Sprint 3: ledger (pool/progress/render/serialize) + unit-тесты (45 passed) |
+| 2025-09 | —       | Sprint 4: memory-store + gap-markers + cost + unit-тесты (64 passed) |

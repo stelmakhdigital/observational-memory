@@ -216,5 +216,10 @@ observational-memory/
   двойного представления), serialize (versioned envelopes, null on corrupt).
   Тестов: 45 passed. Важные решения: watermark — MESSAGE id; id наблюдений
   lexicographically ordered (seq scoped to second, nextObsSeqAt).
-- Следующий шаг: Sprint 4 — memory-store (topic files, INDEX.md, JOURNEY.md, fork-seed)
-  + gap-markers + cost + тесты.
+- 2025-09: Sprint 4 выполнен: memory-store (MemoryStore: session-директории, topic
+  files с front-matter, INDEX.md render, JOURNEY, one-time fork-seed без .runs;
+  parseFrontMatter/renderTopicFile/renderMemoryMap), gap-markers (detectGap,
+  humanDuration с русской плюрализацией, renderGapMarkers), cost (sumCosts по всем
+  веткам, skip невалидных). Тестов: 64 passed.
+- Следующий шаг: Sprint 5 — prompts (observer/consolidator) + парсер worker-output +
+  тесты.

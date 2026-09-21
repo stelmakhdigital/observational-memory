@@ -8,3 +8,6 @@ export * from './ids.js';
 export * from './tokens.js';
 export * from './chunker.js';
 export * from './ledger/index.js';
+export * from './memory-store.js';
+export * from './gap-markers.js';
+export * from './cost.js';
