@@ -1,20 +1,20 @@
 {
   "id": "user-preferences",
-  "description": "Stable user facts and current-task state that must survive (profile + current-task extractors).",
+  "description": "Stable user facts and current-task state that must survive (profile + current-task extractors). Kept short: total history must fit ONE 150-token chunk so every fact lands in the observed region (no unobserved tail).",
   "turns": [
-    "user: Привет. Работаем на этом проекте неделю. Запомни: я говорю по-русски, таймзона — Europe/Berlin.",
-    "assistant: Принято: язык — русский, таймзона Europe/Berlin. Записал в профиль.",
-    "user: В редакторе у меня тёмная тема, и мне не нравится, когда в коде остаются console.log — удаляй их всегда.",
-    "assistant: Понял: тёмная тема в редакторе, и я всегда удаляю console.log при правках.",
-    "user: Сейчас главная задача — подготовить release notes для v2.0. Это приоритет недели.",
-    "assistant: Хорошо, начинаю: соберу изменения за релиз в docs/RELEASE_NOTES.md. Сначала посмотрю коммиты с v1.8.",
-    "user: И учти: API-ключ для staging ещё не выдан — без него интеграционные тесты не поднять. Это блокер.",
-    "assistant: Зафиксировал: блокер — нет API-ключа для staging, интеграционные тесты ждать выдачи ключа.",
-    "user: Пока ждём ключ — сделай unit-тесты для модуля отчётов в src/reports/.",
-    "assistant: Готово: добавил unit-тесты для src/reports/ (12 кейсов, все зелёные). Ждём API-ключ для интеграционных."
+    "user: Привет, работаем на этом проекте. Запомни: я говорю по-русски, таймзона — Europe/Berlin.",
+    "assistant: Принято: язык — русский, таймзона Europe/Berlin.",
+    "user: Ещё: я всегда хочу, чтобы ты удалял console.log из кода. И редактор у меня в тёмной теме.",
+    "assistant: Понял: console.log удаляю всегда, тёмная тема учтена.",
+    "user: Главная задача недели — подготовить release notes для v2.0. Собери изменения из коммитов с v1.8 в docs/RELEASE_NOTES.md.",
+    "assistant: Начинаю: просмотрю коммиты с v1.8 и соберу release notes в docs/RELEASE_NOTES.md.",
+    "user: Пока — сделай unit-тесты для модуля отчётов в src/reports/. И учти: API-ключ для staging не выдан, без него интеграционные тесты не поднять — это блокер.",
+    "assistant: Готово: 12 unit-тестов для src/reports/, все зелёные. API-ключ staging — блокер, интеграционные тесты ждём.",
+    "user: Хорошо, спасибо. Ждём ключ.",
+    "assistant: Ждём."
   ],
   "expectedFacts": [
-    "русск",
+    ["русск", "russian"],
     "Europe/Berlin",
     "console.log",
     "release notes",

@@ -37,7 +37,7 @@ interface EvalCase {
   id: string;
   description?: string;
   turns: string[];
-  expectedFacts: string[];
+  expectedFacts: Array<string | string[]>;
 }
 
 interface CaseReport {
@@ -135,13 +135,18 @@ async function runCase(evalCase: EvalCase, root: string): Promise<CaseReport> {
   const corpus = normalize(docs.map((d) => d.text).join('\n'));
   const topics = session.memory.listTopics(evalCase.id);
 
-  const facts = evalCase.expectedFacts.map((fact) => {
-    const needle = normalize(fact);
+  const facts = evalCase.expectedFacts.map((factOrAlts) => {
+    // a fact may carry alternative spellings (string[] — any-of), e.g. a
+    // language recorded as "Russian" (EN output) or "русский" (RU output).
+    const alts: string[] = Array.isArray(factOrAlts) ? factOrAlts : [factOrAlts];
+    const label = Array.isArray(factOrAlts) ? factOrAlts[0]! : factOrAlts;
+    const needles = alts.map(normalize);
     const where: string[] = [];
     for (const d of docs) {
-      if (normalize(d.text).includes(needle)) where.push(d.kind);
+      const text = normalize(d.text);
+      if (needles.some((n) => text.includes(n))) where.push(d.kind);
     }
-    return { fact, found: where.length > 0, where: [...new Set(where)] };
+    return { fact: label, found: where.length > 0, where: [...new Set(where)] };
   });
   const found = facts.filter((f) => f.found).length;
 
