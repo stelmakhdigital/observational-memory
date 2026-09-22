@@ -75,7 +75,7 @@ class ScriptedRunner implements ModelRunner {
         runId: input.runId,
         ok: true,
         costUsd: 0.001,
-        observations: [`Host discussed: ${firstLine.slice(0, 80)}`],
+        observations: [{ text: `Host discussed: ${firstLine.slice(0, 80)}`, priority: 'routine' as const }],
       };
     }
     if (role === 'consolidator') {

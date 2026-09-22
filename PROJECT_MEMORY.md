@@ -341,6 +341,37 @@ observational-memory/
   workers, детерминированный model-free block, embedded core. Быстрые выигрыши
   v0.4+: current-task extractor + priority labels + /om:recall + provenance +
   includePrevious — выравнивание со стандартом ниши при низкой цене.
+- 2025-09: **v0.4 feature wave — все 4 фазы реализованы (релиз v0.4.0)**.
+  Ремаппинг: фазы 1–4 одной волной (код взаимосвязан) → один релиз v0.4.0
+  вместо v0.4/v0.5/v0.6/v0.7. Что добавлено (209 тестов, typecheck 0):
+  Ф1: priority-метки P0/P1/P2 (observer-промпт, ObservationDraft, orderByPriority,
+  маркеры !/· в блоке); встроенный current-task-экстрактор + renderCurrentTask
+  (первая секция блока); includePrevious (default true, opt-out per spec);
+  supersede-политика (consolidator: 'superseded (date): old -> new', оба факта
+  остаются) + asOf/sourceIds в экстракторах. Ф2: recall.ts (tokenize en/ru +
+  stopwords, BM25-lite k1=1.5/b=0.75, дет-тибрейки: свежие раньше),
+  buildSessionRecallDocs (общий билдер: orch/MCP/eval), тул om_recall (TypeBox)
+  + /om:recall [limit N][since D][until D]; provenance sourceRange {fromId,toId}
+  (chunker fromId); compaction.inject full|topK + trimToBudget (классами,
+  свежие первыми). Ф3: sanitize.ts (injection-паттерны → quarantined, рендер
+  [UNVERIFIED]) + observer-правила (история=данные, секреты не записывать);
+  FileLedgerStore sibling-lock {pid,at} (stale-забор, отказ через onAppendError,
+  lock:false); eval/run.ts + eval/cases (npm run eval: fact survival/сжатие/cost
+  → report.json, реальные воркеры через OM_PI_BIN/OM_EVAL_MODEL); reflector-роль
+  (idle≥30мин + minInterval 6ч по om.run, scoped-тулы, REFLECTION_REPORT,
+  /om:reflect). Ф4: shared memory <root>/shared (read-only: recall kind
+  shared-topic, референс в consolidator/reflector); seedFrom force +
+  /om:seed-from; attachments auto|off ([image: name]/[file: name], байты не
+  передаются — ограничение); MCP-сервер src/adapters/mcp (stdio JSON-RPC:
+  om_status/om_recall/om_topics, handleMcpRequest — чистый, тестируем). 4.4
+  (FTS/sqlite) осознанно отложен. Новые модули: core/{recall,sanitize,testing}.ts,
+  core/prompts/reflector.ts, adapters/mcp/server.ts, eval/. Конфиг-ключи:
+  priority, compaction{inject,topKBudgetTokens}, reflector{enabled,idleMs,
+  minIntervalMs}, shared{enabled}, attachments (pi), models.reflect,
+  extractors[].includePrevious. Ключевые решения: priority = порядок рендера
+  (critical→routine) + budget-trim (не сортировка по важности внутри чанка);
+  since/until фильтруют только наблюдения (файлы без дат); reflect не потребляет
+  наблюдения (без tombstones); MCP read-only (без оркестратора/раннера).
 - 2025-09: **push выполнен**: main (3b2d1cb) + тег v0.1.0 → github.com:stelmakhdigital/observational-memory.
   Корень проблемы SSH: права на ~/.ssh/id_ed25519 были 0664 (chmod 600) + агент SSH держит
   ключ в locked-состоянии. Обход зашит в ~/.ssh/config: Host github.com →

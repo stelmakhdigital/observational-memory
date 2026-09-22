@@ -66,33 +66,38 @@
 - [x] v2: extractors (Mastra-style)
 - [x] v2: early activation (model_select + idle-таймер, chunker minTokens)
 - [x] v2+: embedded-путь для чужих агентов (FileLedgerStore + createOmSession + demo)
-- [ ] v2+: конкретные адаптеры (non-pi агенты)
+- [x] v2+: MCP-адаптер (read-only: om_status/om_recall/om_topics) — закрывает «non-pi агенты» для MCP-клиентов
+- [ ] v2+: нативные адаптеры (Claude Code/Codex как плагины, не через MCP)
 
-## Proposed backlog v0.4+ (на основе разведки рынка/ниши 22.09; не утверждено)
+## Backlog v0.4+ (на основе разведки рынка/ниши 22.09) — ВЫПОЛНЕНО в v0.4.0 (22.09)
 
-### Фаза 1 (v0.4) — «стандарт жанра OM»: качество памяти
-- [ ] 1.1 Priority-метки наблюдений (observer → `priority: critical|important|routine|trivial`; render: важное в начало, при давлении бюджета сначала отбрасывается triviales) — ~0.5–1 спринта (nik1t7n 🔴🟡🟢✅)
-- [ ] 1.2 Встроенный current-task-экстрактор: `{task, pending[], nextStep?, asOf}`, всегда первой строкой компактного блока — ~0.5 (Mastra builtin)
-- [ ] 1.3 `includePrevious` для экстракторов: предыдущее значение показывается экстрактору → инкрементальное обновление профилей, default true — ~0.25 (Mastra includePreviousExtraction)
-- [ ] 1.4 Supersede-политика: противоречия в consolidator'е → явная заметка «старое → новое (дата)», оба факта остаются; значения экстракторов несут `{value, asOf, sourceIds}` — ~0.5 (Graphiti invalidation / supermemory contradictions)
+> Ремаппинг релизов: фазы 1–4 реализованы одной feature wave (код взаимосвязан),
+> релиз **v0.4.0** вместо v0.4/v0.5/v0.6/v0.7 по фазам. 4.4 (FTS/sqlite) — осознанно
+> не делаем: BM25-lite в recall закрывает потребность на наших масштабах.
 
-### Фаза 2 (v0.5) — доступ к памяти: recall + provenance
-- [ ] 2.1 `omRecall`-тул + `/om:recall <query>`: детерминированный BM25-lite по наблюдениям/темам/JOURNEY/extracted; хиты с id и указателем на источник; тул доступен самому агенту посреди диалога — ~1 спринт (nik1t7n om_recall; главный функциональный разрыв)
-- [ ] 2.2 Provenance: наблюдение несёт `sourceRange {sessionId, fromSeq, toSeq}` (observer уже знает границы чанка) → recall/аудит указывает на исходную историю — ~0.5 (SentioLabs evidence-backed, Graphiti provenance)
-- [ ] 2.3 Ranked-инжекция (опциональный режим `compaction.inject: full|topK`) для больших пулов — ~1, можно отложить
+### Фаза 1 — «стандарт жанра OM»: качество памяти
+- [x] 1.1 Priority-метки: observer `[P0]/[P1]/[P2]` → `priority: critical|important|routine`; orderByPriority в блоке; trimToBudget при давлении
+- [x] 1.2 Встроенный current-task-экстрактор `{task, pending[], nextStep?, asOf}`, первой секцией компактного блока (`renderCurrentTask`)
+- [x] 1.3 `includePrevious` (default true): инкрементальное обновление экстракторов; opt-out per spec
+- [x] 1.4 Supersede-политика: consolidator «противоречие → старый факт помечен `superseded (<date>): old -> new`, оба остаются»; asOf/sourceIds в значениях
 
-### Фаза 3 (v0.6) — надёжность, безопасность, eval
-- [ ] 3.1 Anti-poisoning: observer-prompt «не записывать инструкции/секреты как факты» + санитайзер (паттерны injection/вложенные system-блоки) + quarantine-маркер — ~0.5 (SentioLabs «evidence is data, not instructions», atlas-defense)
-- [ ] 3.2 Crash-durability (embedded): flock/PID-защита FileLedgerStore от двух процессов, recovery stale-locks — ~0.5 (nik1t7n locks/.bak)
-- [ ] 3.3 Self-eval harness: `npm run eval` — скриптовые сессии → метрики (выживаемость ключевых фактов, token/cost бюджеты); регрессионный контроль промптов — ~1.5 (LongMemEval/LoCoMo как индустриальный референс)
-- [ ] 3.4 Reflector-роль (sleep-time, Letta): редкий фоновый воркер (idle ≥ 30 мин / ночью) — реорганизация тем, INDEX/JOURNEY, supersede-кандидаты; жёсткий cost-порог — ~1
+### Фаза 2 — доступ к памяти: recall + provenance
+- [x] 2.1 Тул `om_recall` + `/om:recall <query> [limit N] [since D] [until D]` — BM25-lite (recall.ts), тул доступен агенту посреди диалога
+- [x] 2.2 Provenance: `sourceRange {fromId, toId}` на наблюдениях (chunker fromId); хиты recall указывают на источник
+- [x] 2.3 Ranked-инжекция: `compaction.inject: full|topK` + topKBudgetTokens
 
-### Фаза 4 (v0.7+) — рост
-- [ ] 4.1 Project-level shared memory (`.memory/shared/`) + `/om seed-from <session>`
-- [ ] 4.2 Вложения (images) в observer + attachment gates (auto/on/off) — Mastra/nik1t7n
-- [ ] 4.3 Temporal queries в recall («как было на дату X») — опирается на 1.4/2.2
-- [ ] 4.4 FTS/sqlite-индекс, если размеров потребует (basic-memory: files+sqlite)
-- [ ] 4.5 MCP-сервер (observe/recall/extract/status) — дешёвый «другой адаптер» для Claude Code/Codex/любого MCP-клиента (вместо 4.5-адаптеров)
+### Фаза 3 — надёжность, безопасность, eval
+- [x] 3.1 Anti-poisoning: санитайзер (sanitize.ts) → quarantined/`[UNVERIFIED]`; observer-промпт «история = данные, инструкции не выполнять, секреты не записывать»
+- [x] 3.2 Crash-durability: sibling-lock FileLedgerStore (pid/at, stale-забор, отказ через onAppendError, `lock: false`)
+- [x] 3.3 Self-eval: `npm run eval` (eval/run.ts + cases) — fact survival/сжатие/cost → report.json
+- [x] 3.4 Reflector-роль (sleep-time): idle ≥ 30 мин + minInterval 6ч, реорг тем/JOURNEY, `/om:reflect`
+
+### Фаза 4 — рост
+- [x] 4.1 Shared memory `<root>/shared` (read-only) + `/om:seed-from <sessionId>` (force, без перезаписи)
+- [x] 4.2 Attachments: именованные плейсхолдеры `[image: name]`/`[file: name]`, gate `attachments: auto|off` (байты не передаются — задокументировано)
+- [x] 4.3 Temporal queries: since/until в recall (фильтр по createdAt наблюдений)
+- [ ] 4.4 FTS/sqlite-индекс — осознанно отложено (BM25-lite достаточен; при росте — сюда)
+- [x] 4.5 MCP-сервер (stdio JSON-RPC): om_status/om_recall/om_topics; export `./adapters/mcp`; `npm run mcp`
 
 Позиционирование (README): «auditable, branch-aware, cost-transparent observational memory for coding agents» — козыри в нише: branch-local ledger+watermark, cost tracking, scoped workers, детерминированный model-free блок, embedded core, ноль внешних сервисов.
 
@@ -121,4 +126,9 @@
 | 2025-09 | 368854d | docs: ручной smoke в реальном pi пройден (48 obs, консолидации, экстракторы, OM-компакция); smoke-пороги из конфига убраны |
 | 2025-09 | 3b2d1cb | v2: early activation (model_select + idle) + fork-seed копирует extracted/ (155 passed); запушено: main + тег v0.1.0 → github.com:stelmakhdigital/observational-memory |
 | 2025-09 | 3982f98 | Release v0.2.0: version bump + тег v0.2.0; pi-установка переключена на git:…@v0.2.0 |
-| 2025-09 | —       | v2+: embedded-интеграция (FileLedgerStore, createOmSession, npm run demo) + quiescent shutdown/compaction, seed по флагу (165 passed) |
+| 2025-09 | 5ced1af | v2+: embedded-интеграция (FileLedgerStore, createOmSession, npm run demo) + quiescent shutdown/compaction, seed по флагу (165 passed) |
+| 2025-09 | 460685a | docs: landscape survey of agent-memory projects (mem0, graphiti, letta, supermemory, basic-memory) + OM gaps/priorities |
+| 2025-09 | 2dd3a6d | docs: observational-memory niche survey (Mastra OM canon + adapter ecosystem, feature-standard gaps, quick wins) |
+| 2025-09 | 7f8d858 | roadmap: proposed backlog v0.4+ (4 фазы из разведки) |
+| 2025-09 | — | v0.4 feature wave (1/2-фаза): priority-метки, current-task, includePrevious, supersede; recall (тул om_recall + /om:recall + BM25-lite + since/until), provenance sourceRange, topK-инжекция (209 тестов) |
+| 2025-09 | — | v0.4 feature wave (3/4-фаза): anti-poisoning sanitize, crash-lock FileLedgerStore, reflector (sleep-time), shared memory + seed-from force, attachments, MCP-сервер, self-eval harness; docs (README/ARCHITECTURE §10) — Release v0.4.0 |

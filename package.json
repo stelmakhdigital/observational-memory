@@ -1,6 +1,6 @@
 {
   "name": "@stelmakhdigital/observational-memory",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Agent-agnostic observational memory core (observers/compaction/consolidator) with a pi-coding-agent adapter",
   "type": "module",
   "license": "MIT",
@@ -13,7 +13,8 @@
   },
   "exports": {
     "./core": "./src/core/index.ts",
-    "./adapters/pi": "./src/adapters/pi/index.ts"
+    "./adapters/pi": "./src/adapters/pi/index.ts",
+    "./adapters/mcp": "./src/adapters/mcp/server.ts"
   },
   "files": [
     "src"
@@ -23,7 +24,9 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
-    "demo": "npm run build && node dist/examples/embedded-demo.js"
+    "demo": "npm run build && node dist/examples/embedded-demo.js",
+    "eval": "npm run build && node dist/eval/run.js",
+    "mcp": "npm run build && node dist/src/adapters/mcp/server.js"
   },
   "peerDependencies": {
     "typebox": "*"

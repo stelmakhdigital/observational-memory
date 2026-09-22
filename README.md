@@ -19,26 +19,51 @@ OM решает проблему *context rot* и *context waste* в длинн�
 - **Observers** — параллельные фоновые воркеры (чистые мапперы), режут token-bounded
   слайсы истории и коммитят атомарные наблюдения; завершаются в любом порядке
   (watermarks `coversUpToId`).
-- **Compaction block** — детерминированный (model-free) рендер: наблюдения +
-  memory map (front-matter тем) + journey + verbatim-хвост. В pi используется как
-  summary компакции (`session_before_compact`).
+- **Приоритеты наблюдений (v0.4)** — observer размечает `critical/important/routine`
+  (P0/P1/P2): в блоке компакции важное — сверху, при давлении бюджета (режим
+  `topK`) triviales отбрасываются первыми.
+- **Provenance (v0.4)** — каждое наблюдение несёт диапазон исходной истории
+  (`sourceRange: fromId→toId`): recall/аудит указывают на источник.
+- **Anti-poisoning (v0.4)** — детерминированный санитайзер quarantined-отмечает
+  наблюдения с injection-подобным содержанием (`[UNVERIFIED]` в блоке); observer
+  проинструктирован не записывать инструкции/секреты как факты.
+- **Compaction block** — детерминированный (model-free) рендер: current task +
+  наблюдения (по приоритету) + memory map (front-matter тем) + journey +
+  verbatim-хвост. В pi используется как summary компакции (`session_before_compact`).
+  Режимы инъекции: `full` (весь пул) и `topK` (детерминированный приоритетный
+  бюджет).
+- **Current task (v0.4)** — встроенный экстрактор `current-task`: текущая задача,
+  pending, следующий шаг; всегда первой секцией компактного блока — агент не
+  теряет нить после компакции.
 - **Consolidator** — последовательный воркер; складывает старейшие наблюдения в
   `.memory/<session>/<topic>.md` (+ `INDEX.md`, `JOURNEY.md`), буфер возвращается
-  к целевому размеру (tombstones).
+  к целевому размеру (tombstones). Политика **supersede, не overwrite**:
+  противоречие → явная пометка «старое → новое (дата)», оба факта остаются.
 - **Journey** — описательная прозаическая история работы, append-mostly, вставляется
   в каждый compaction block для ориентации.
-- **Gap markers** — временные якорь при возобновлении сессии после паузы (по умолч. ≥ 10 мин).
-- **Cost tracking** — стоимость фоновых LLM-вызовов (включая экстракторы),
-  суммируется по всем веткам (никогда не уменьшается при `/tree`), видна в статусе.
-- **Extractors (v2)** — именованные структурированные значения (по умолч. `profile`:
-  профиль и предпочтения пользователя), обновляются после консолидации по
-  только что консолидированным наблюдениям; хранение `.memory/<session>/extracted/<id>.json`.
-  Настраиваются/отключаются в `extractors`, форсируются командой `/om:extract`.
+- **Recall (v0.4)** — детерминированный BM25-lite поиск по памяти (наблюдения,
+  темы, journey, экстракторы) **посреди диалога**: тул `om_recall` для самого
+  агента + команда `/om:recall <query> [limit N] [since DATE] [until DATE]`.
+  Без LLM, без векторов, без БД.
+- **Shared memory (v0.4)** — project-level темы в `<root>/shared/` (read-only):
+  попадают в recall и как референс в consolidator; ручной seed из другой сессии —
+  `/om:seed-from <sessionId>`.
+- **Gap markers** — временные якоря при возобновлении сессии после паузы (по умолч. ≥ 10 мин).
+- **Cost tracking** — стоимость фоновых LLM-вызовов (все роли), суммируется по
+  всем веткам (никогда не уменьшается при `/tree`), видна в статусе.
+- **Extractors (v2)** — именованные структурированные значения (по умолч. `profile`
+  и `current-task`), обновляются после консолидации; **includePrevious** (по
+  умолч. true): экстрактору показывается старое значение → инкрементальное
+  обновление (опция `includePrevious: false` — volatile-значения). Хранение
+  `.memory/<session>/extracted/<id>.json`, форсинг — `/om:extract`.
 - **Early activation (v2)** — наблюдение «раньше порога» при смене модели
   (`model_select`, промпт-кэш всё равно сброшен) и при тишине пользователя ≥ idleMs
   (буфер наполняется, пока мы ждём). Настраивается в `earlyActivation`.
-- **Безопасные воркеры** — observer без тулов, consolidator с доступом только к
-  своему session-каталогу памяти.
+- **Reflector (v0.4, sleep-time)** — редкий фоновый воркер (idle ≥ 30 мин, не чаще
+  раза в 6 ч): реорганизация тем (merge/rename), сжатие JOURNEY, перенос устаревшего
+  в «History». Редкий и rate-limited; форсируется `/om:reflect`.
+- **Безопасные воркеры** — observer без тулов; consolidator/reflector — только
+  scoped `read/write/edit/ls/grep` в своём session-каталоге памяти.
 - **Gate по умолчанию OFF** — расширение невидимо, пока не включить (`/om on`).
 
 ## Установка
@@ -58,7 +83,7 @@ npm test            # vitest (без LLM)
 подхватывается автоматически):
 
 ```bash
-pi install git:github.com/stelmakhdigital/observational-memory@v0.1.0   # тег
+pi install git:github.com/stelmakhdigital/observational-memory@v0.4.0   # тег
 pi install /абсолютный/путь/к/observational-memory               # локальный каталог
 pi -e /абсолютный/путь/к/observational-memory                    # один раз, без установки
 pi remove git:github.com/stelmakhdigital/observational-memory          # удалить
@@ -72,7 +97,9 @@ typebox — peerDependency, поставляется самим pi).
 { "extensions": ["/абсолютный/путь/к/observational-memory/src/adapters/pi/index.ts"] }
 ```
 
-После установки доступны команды: `/om`, `/om:status`, `/om:compact`, `/om:consolidate`, `/om:extract`.
+После установки доступны команды: `/om`, `/om:status`, `/om:compact`, `/om:consolidate`,
+`/om:extract`, `/om:recall`, `/om:reflect`, `/om:seed-from` и тул `om_recall`
+(агент ищет в памяти сам, посреди диалога).
 
 ## Использование
 
@@ -82,12 +109,17 @@ typebox — peerDependency, поставляется самим pi).
 /om:compact       # форсированная компакция через OM-блок
 /om:consolidate   # форсированная консолидация (фоновая)
 /om:extract       # форсированное обновление экстракторов (фоновое)
+/om:recall <query> [limit N] [since DATE] [until DATE]   # поиск по памяти (детерминированный)
+/om:reflect       # форсированный sleep-time пропуск реорганизации памяти (фоновый)
+/om:seed-from <sessionId>   # разовый seed памяти из другой сессии (force, без перезаписи)
 /om off           # выключить
 ```
 
 Повседневный сценарий: `/om on` в начале длинной сессии. Observers работают сами
 на `turn_end`; при росте контекста компакция автоматически использует OM-блок;
-пул наблюдений периодически консолидируется в долгие файлы.
+пул наблюдений периодически консолидируется в долгие файлы. Если агенту нужен
+старый факт/решение, которого нет в видимом контексте, он сам вызывает тул
+`om_recall` (или пользователь — `/om:recall`).
 
 ## Конфигурация
 
@@ -108,13 +140,23 @@ typebox — peerDependency, поставляется самим pi).
     "models": {
       "observer":     { "id": "claude-sonnet-4-6", "thinking": "low" },
       "consolidator": { "id": "claude-sonnet-4-6", "thinking": "medium" },
-      "extractor":    { "id": "claude-sonnet-4-6", "thinking": "low" } // опц., по умолч. = consolidator
+      "extractor":    { "id": "claude-sonnet-4-6", "thinking": "low" },
+      "reflect":      { "id": "claude-sonnet-4-6", "thinking": "low" } // опц., по умолч. = consolidator
     },
     "extractors": [                    // пустой список [] — выключить экстракторы
       { "id": "profile",
         "name": "User profile & preferences",
-        "description": "Stable facts about the user and their preferences..." }
+        "description": "Stable facts about the user and their preferences...",
+        "includePrevious": true },     // опц.: показывать старое значение (инкремент), по умолч. true
+      { "id": "current-task",
+        "name": "Current task & next steps",
+        "description": "The CURRENT state of the work..." }
     ],
+    "priority": { "enabled": true },   // v0.4: priority-метки наблюдений (P0/P1/P2)
+    "compaction": { "inject": "full", "topKBudgetTokens": 20000 }, // "full" | "topK"
+    "reflector": { "enabled": true, "idleMs": 1800000, "minIntervalMs": 21600000 },
+    "shared": { "enabled": true },     // v0.4: project-level темы <root>/shared (read-only)
+    "attachments": "auto",             // "auto" (плейсхолдеры [image: name]) | "off"
     "passive": false,              // power-user: только ручные команды (для теста /tree)
     "debugLog": false,
     "gapMarkers": { "enabled": true, "thresholdMs": 600000 },
@@ -125,6 +167,19 @@ typebox — peerDependency, поставляется самим pi).
 ```
 
 Переменные окружения: `OM_PI_BIN` (бинарник pi), `OM_WORKER_TIMEOUT_MS` (таймаут воркера).
+
+### MCP-сервер (любой MCP-клиент, v0.4)
+
+Read-only доступ к памяти сессии из любого MCP-клиента (Claude Code, Codex, свой
+хост) — «дёшево» закрыть адаптер под чужого агента:
+
+```bash
+OM_MCP_ROOT=<memory root> OM_MCP_SESSION=<sessionId> npm run mcp
+# инструменты: om_status, om_recall (query/limit/since/until), om_topics
+```
+
+Транспорт — JSON-RPC 2.0 over stdio (MCP-протокол: initialize/tools/list/tools/call).
+Публичный экспорт: `@stelmakhdigital/observational-memory/adapters/mcp`.
 
 ## Встраивание в свой агент (без pi)
 
@@ -149,43 +204,61 @@ session.orchestrator.setEnabled(true);
 ```
 
 - ledger — `FileLedgerStore` (JSONL, append-only, corrupt-устойчивый), gate/
-  watermark переживают рестарт процесса;
-- ручные триггеры — `forceConsolidate()` / `forceExtract()` / `forceCompact()`;
-- пример без LLM: `npm run demo` (`examples/embedded-demo.ts`).
+  watermark переживают рестарт процесса; sibling-lock (`ledger.jsonl.lock`) защищает
+  от записи двумя процессами (stale-locks забираются автоматически);
+- ручные триггеры — `forceConsolidate()` / `forceExtract()` / `forceCompact()` /
+  `forceReflect()`;
+- **recall без LLM** — `session.orchestrator.recall(query, { limit, since, until })` /
+  `recallText(...)` — BM25-lite по наблюдениям, темам, journey, экстракторам;
+- `DemoHistory` (экспорт из `./core`) — минимальная in-memory история для тестов/eval;
+- пример без LLM: `npm run demo` (`examples/embedded-demo.ts`);
+- self-eval (с реальным LLM): `npm run eval` — выживаемость ключевых фактов после
+  observe→consolidate→extract, сжатие, стоимость (env `OM_EVAL_MODEL`, `OM_PI_BIN`).
 
 ## Архитектура
 
 ```
 raw chunks (token-bounded)
-  → parallel observers (headless `pi -p --mode json`)
-  → observations {id, coversUpToId, content, tokenCount}
-  → ledger (append-only, branch-local: pi.appendEntry)
-  → compaction block (deterministic, model-free)
-  → consolidator (headless, one at a time)
-  → .memory/<session>/<topic>.md + INDEX.md + JOURNEY.md (durable)
-  → extractors (headless, after consolidation) → .memory/<session>/extracted/<id>.json
+  → parallel observers (headless `pi -p --mode json`; priority P0/P1/P2, provenance)
+  → observations {id, coversUpToId, content, priority, sourceRange, quarantined?}
+  → ledger (append-only, branch-local: pi.appendEntry / ledger.jsonl)
+  → compaction block (deterministic, model-free: current task → по приоритету → topK-бюджет)
+  → consolidator (headless, one at a time; supersede-политика)
+  → .memory/<session>/<topic>.md + INDEX.md + JOURNEY.md (durable) + shared/
+  → extractors (headless, after consolidation; includePrevious) → extracted/<id>.json
+  → reflector (sleep-time, редкий) — реорг тем/JOURNEY
+  → recall (BM25-lite, детерминированный) — om_recall тул / /om:recall / MCP
 ```
 
 Слои: `src/core` (agent-agnostic, публичный API `./core`) → `src/adapters/pi`
-(`./adapters/pi`). Правило: `core` не импортирует `adapters`; все LLM-вызовы — через
-`ModelRunner`. Подробности — в `docs/ARCHITECTURE.md`, требования — в
-`docs/REQUIREMENTS.md`.
+(`./adapters/pi`) → `src/adapters/mcp` (`./adapters/mcp`). Правило: `core` не
+импортирует `adapters`; все LLM-вызовы — через `ModelRunner`. Подробности — в
+`docs/ARCHITECTURE.md`, требования — в `docs/REQUIREMENTS.md`.
 
 ## Тестирование
 
 ```bash
-npm test          # 165 тестов: unit (core + adapter) + интеграция пайплайна (без LLM)
+npm test          # 209 тестов: unit (core + адаптеры) + интеграция пайплайна (без LLM)
 npm run typecheck # tsc --noEmit
 npm run demo      # embedded-демо: полный пайплайн в "чужом" агенте, без LLM/pi
+npm run eval      # self-eval с реальным LLM: выживаемость фактов, сжатие, cost (eval/report.json)
 ```
 
 Воркеры в тестах — `MockRunner`/фейковый pi-бинарник, поэтому CI не расходует токены.
+`npm run eval` расходует токены (скриптовые сессии через реальных воркеров) —
+запускайте после изменений промптов как регрессионный контроль качества памяти.
 
-## Известные ограничения (v1)
+## Известные ограничения
 
 - Воркеры запускаются с `--no-builtin-tools` + worker-расширением: observer **без
-  тулов** (чистый маппер), consolidator — **только scoped** `read/write/edit/ls/grep`
-  в пределах `.memory/<session>/` (path containment, без bash/сети).
+  тулов** (чистый маппер), consolidator/reflector — **только scoped**
+  `read/write/edit/ls/grep` в пределах `.memory/<session>/` (path containment,
+  без bash/сети).
+- Вложения: observer видит именованные плейсхолдеры (`[image: name]`, `[file: name]`)
+  — сами image-байты в текстовых воркеры не передаются (gate `attachments`: `auto`/`off`).
+- Поисковый слой — детерминированный BM25-lite (токенизация + stopwords), без
+  эмбеддингов и sqlite-индекса: на масштабах кодинг-агентов (темы + пул наблюдений)
+  этого достаточно; при росте — FTS/sqlite-индекс (см. roadmap v2+).
 - `estimateTokens` — эвристика (chars/4 + densification), достаточно точная для
   порогов (±10–20%).
 

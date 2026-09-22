@@ -2,3 +2,4 @@ node_modules/
 dist/
 .memory/
 *.log
+eval/report.json

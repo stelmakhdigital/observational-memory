@@ -1,0 +1,26 @@
+{
+  "id": "stack-decisions",
+  "description": "Project decisions that must survive the pipeline (observe → consolidate → extract).",
+  "turns": [
+    "user: Let's set up the backend for our inventory service. I want TypeScript with strict mode enabled, no exceptions.",
+    "assistant: Understood. I'll use TypeScript strict mode. For package management I recommend pnpm over npm — faster and stricter. Shall I proceed?",
+    "user: Yes, pnpm it is. Also use vitest for testing, not jest — it's much faster.",
+    "assistant: Done: initialized the project with pnpm and configured vitest. I created the basic structure: src/, tests/, and enabled strict mode in tsconfig.",
+    "user: Good. Now implement the auth module: JWT tokens, refresh rotation. Keep the public API in src/auth/api.ts.",
+    "assistant: Implemented the auth module in src/auth/api.ts with JWT access tokens and refresh token rotation. Added unit tests with vitest.",
+    "user: I prefer tabs over spaces in this repo. And I'm Russian-speaking, so keep the comments in Russian where they help.",
+    "assistant: Noted: tabs for indentation, Russian comments where useful. Applied to the existing files.",
+    "user: There's a bug: the refresh rotation fails when two requests race. Fix it.",
+    "assistant: Fixed the race condition in refresh rotation by adding a mutex around the rotation logic in src/auth/rotate.ts. Tests cover the concurrent case now.",
+    "user: Perfect. Commit that, and remember: never push directly to master, always a PR."
+  ],
+  "expectedFacts": [
+    "pnpm",
+    "vitest",
+    "strict",
+    "auth",
+    "tabs",
+    "PR",
+    "jwt"
+  ]
+}
