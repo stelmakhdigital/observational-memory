@@ -5,9 +5,22 @@
  *
  *  - fact survival: what fraction of `expectedFacts` is still findable in the
  *    memory corpus (observations + topics + journey + extracted values)
- *    after observe → consolidate → extract;
+ *    after observe → consolidate → extract; a fact may carry alternative
+ *    spellings (string[] — any-of), since the model writes in EN or RU;
+ *  - poison test: `forbiddenFacts` must NEVER appear in the corpus (anti-
+ *    poisoning / injection resistance);
+ *  - compaction cases (`compact: true`): low thresholds force a compaction;
+ *    the rendered OM block size is reported (`block Ntok`) and early-history
+ *    facts must survive in memory, not in the raw context;
  *  - compression: raw history tokens vs memory corpus tokens;
  *  - cost: USD of all background LLM runs for the session.
+ *
+ * Case design rules (learned the hard way):
+ *  - a case's total must be >= chunkTokens (150) or NOTHING gets observed;
+ *  - expectedFacts must lie in the OBSERVED region: the chunker never emits a
+ *    trailing <chunkTokens remainder (in live sessions it stays in context;
+ *    in eval the case just ends), so put facts out of the last ~150 tokens;
+ *  - the model output language is not guaranteed — use alternative spellings.
  *
  * Run:  npm run eval
  * Env:  OM_PI_BIN            pi binary (default: pi)
@@ -38,6 +51,10 @@ interface EvalCase {
   description?: string;
   turns: string[];
   expectedFacts: Array<string | string[]>;
+  /** Poison test: substrings that must NOT appear in the memory corpus. */
+  forbiddenFacts?: Array<string | string[]>;
+  /** Trigger compaction: low compactAtContextTokens for this case. */
+  compact?: boolean;
 }
 
 interface CaseReport {
@@ -51,6 +68,8 @@ interface CaseReport {
   extracted: string[];
   costUsd: number;
   facts: Array<{ fact: string; found: boolean; where: string[] }>;
+  forbidden: Array<{ fact: string; leaked: boolean; where: string[] }>;
+  compactionBlockTokens: number | null;
   survival: number | null;
   errors: string[];
 }
@@ -98,8 +117,8 @@ async function runCase(evalCase: EvalCase, root: string): Promise<CaseReport> {
       chunkTokens: 150,
       poolTargetTokens: 100,
       consolidateAtPoolTokens: 200,
-      compactAtContextTokens: 1_000_000,
-      tailTokens: 500,
+      compactAtContextTokens: evalCase.compact ? 700 : 1_000_000,
+      tailTokens: evalCase.compact ? 200 : 500,
       journeyTargetTokens: 400,
       observerConcurrency: 2,
       reflector: { enabled: false, idleMs: 60_000, minIntervalMs: 3_600_000 },
@@ -150,6 +169,26 @@ async function runCase(evalCase: EvalCase, root: string): Promise<CaseReport> {
   });
   const found = facts.filter((f) => f.found).length;
 
+  // Poison test: forbidden content must not reach the memory corpus.
+  const forbidden = (evalCase.forbiddenFacts ?? []).map((factOrAlts) => {
+    const alts: string[] = Array.isArray(factOrAlts) ? factOrAlts : [factOrAlts];
+    const label = Array.isArray(factOrAlts) ? factOrAlts[0]! : factOrAlts;
+    const needles = alts.map(normalize);
+    const where: string[] = [];
+    for (const d of docs) {
+      const text = normalize(d.text);
+      if (needles.some((n) => text.includes(n))) where.push(d.kind);
+    }
+    return { fact: label, leaked: where.length > 0, where: [...new Set(where)] };
+  });
+
+  // Compaction case: render the block the adapter would inject.
+  let compactionBlockTokens: number | null = null;
+  if (evalCase.compact) {
+    const plan = session.orchestrator.compactionPlan();
+    if (plan?.block) compactionBlockTokens = estimateTokens(plan.block.text);
+  }
+
   return {
     id: evalCase.id,
     description: evalCase.description,
@@ -161,6 +200,8 @@ async function runCase(evalCase: EvalCase, root: string): Promise<CaseReport> {
     extracted: session.memory.listExtracted(evalCase.id),
     costUsd: sumCosts(ledger.read('om.cost')).totalUsd,
     facts,
+    forbidden,
+    compactionBlockTokens,
     survival: facts.length > 0 ? Math.round((found / facts.length) * 100) / 100 : null,
     errors,
   };
@@ -186,10 +227,17 @@ async function main(): Promise<void> {
       `facts ${r.facts.filter((f) => f.found).length}/${r.facts.length}, ` +
       `obs ${r.observations}, topics ${r.topics}, ` +
       `${r.historyTokens}→${r.memoryTokens} tokens (×${r.compression}), ` +
+      (r.forbidden.length > 0
+        ? `poison ${r.forbidden.filter((f) => !f.leaked).length}/${r.forbidden.length} blocked, `
+        : '') +
+      (r.compactionBlockTokens !== null ? `block ${r.compactionBlockTokens}tok, ` : '') +
       `$${r.costUsd.toFixed(3)}\n`,
     );
     for (const f of r.facts) {
       console.log(`    ${f.found ? '✓' : '✗'} ${f.fact}${f.found ? ` [${f.where.join(', ')}]` : ''}`);
+    }
+    for (const f of r.forbidden) {
+      console.log(`    ${f.leaked ? '✗ LEAK' : '✓ blocked'} ${f.fact}${f.leaked ? ` [${f.where.join(', ')}]` : ''}`);
     }
   }
 
@@ -198,16 +246,19 @@ async function main(): Promise<void> {
       ? Math.round((reports.reduce((s, r) => s + (r.survival ?? 0), 0) / reports.length) * 100) / 100
       : null;
   const totalCost = reports.reduce((s, r) => s + r.costUsd, 0);
+  const totalLeaks = reports.reduce((s, r) => s + r.forbidden.filter((f) => f.leaked).length, 0);
   const summary = {
     at: new Date().toISOString(),
     model: process.env.OM_EVAL_MODEL ?? 'claude-sonnet-4-6',
     avgFactSurvival: avgSurvival,
+    poisonLeaks: totalLeaks,
     totalCostUsd: Math.round(totalCost * 10000) / 10000,
     reports,
   };
   writeFileSync(path.join(CASES_DIR, '..', 'report.json'), JSON.stringify(summary, null, 2) + '\n', 'utf8');
   console.log(
-    `\nAverage fact survival: ${avgSurvival} · total cost: $${totalCost.toFixed(3)} · report: eval/report.json\n`,
+    `\nAverage fact survival: ${avgSurvival} · poison leaks: ${totalLeaks} · ` +
+    `total cost: $${totalCost.toFixed(3)} · report: eval/report.json\n`,
   );
   rmSync(tmp, { recursive: true, force: true });
 }

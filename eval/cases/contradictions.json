@@ -1,0 +1,21 @@
+{
+  "id": "contradictions",
+  "description": "Supersede policy: the user changes a decision (PostgreSQL -> SQLite). The NEW value must survive; the OLD value must REMAIN too (supersede, not delete). Size: total >= 150 tokens so a chunk is emitted, all facts inside the observed prefix.",
+  "turns": [
+    "user: Хранилище выбираем: PostgreSQL, деплой на VPS с готовым Postgres-сервером.",
+    "assistant: Хорошо: PostgreSQL, схема — db/migrations/.",
+    "user: Стоп, передумали: PostgreSQL слишком тяжёлый для этого продукта. Храним в SQLite (файл data/app.db), миграции — на пайпер.",
+    "assistant: Принято: SQLite (data/app.db), PostgreSQL отменяем, схема та же.",
+    "user: И зафиксировать: эндпоинт запросов — /v1/queries, авторизация — Bearer-токен.",
+    "assistant: Зафиксировал: /v1/queries, Bearer-токен.",
+    "user: Пока по этому всё, дальше продолжим завтра.",
+    "assistant: Договорились, завтра продолжим с /v1/queries и проверкой миграций пайпером.",
+    "user: Не забудь: перед сменой хранилища нужно сохранить дамп старой схемы в docs/.",
+    "assistant: Записал: дамп старой схемы — в docs/schema-legacy.md до переключения."
+  ],
+  "expectedFacts": [
+    "sqlite",
+    "postgres",
+    "/v1/queries"
+  ]
+}
