@@ -237,16 +237,78 @@ raw chunks (token-bounded)
 
 ## Тестирование
 
+### Слои без LLM (быстро, токены не расходуются)
+
 ```bash
-npm test          # 209 тестов: unit (core + адаптеры) + интеграция пайплайна (без LLM)
+npm test          # 209 тестов (vitest)
 npm run typecheck # tsc --noEmit
-npm run demo      # embedded-демо: полный пайплайн в "чужом" агенте, без LLM/pi
-npm run eval      # self-eval с реальным LLM: выживаемость фактов, сжатие, cost (eval/report.json)
+npm run demo      # полный пайплайн в "чужом" агенте, без LLM/pi (скриптованный runner)
 ```
 
-Воркеры в тестах — `MockRunner`/фейковый pi-бинарник, поэтому CI не расходует токены.
-`npm run eval` расходует токены (скриптовые сессии через реальных воркеров) —
-запускайте после изменений промптов как регрессионный контроль качества памяти.
+| Слой | Что проверяется | Токены |
+|------|-----------------|--------|
+| **Unit: core** | tokens/chunker (слайсы, watermark), ledger (pool fold, tombstones, `trimToBudget`/`orderByPriority`, render-детерминизм), memory-store (темы, INDEX, fork-seed, shared, seed-from force), gap-markers, cost, **парсеры worker-output** (observer с P0/P1/P2-тегами, consolidation, extractor, reflection), config (merge/инварианты), sanitize (injection-паттерны), recall (tokenize/BM25/since/until), FileLedgerStore (corrupt-строки, lock) | нет |
+| **Unit: pi-адаптер** | config (settings merge), history (entry→text, attachment gates), ledger (appendEntry), scoped-tools (path containment), worker (роли), **runner на РЕАЛЬНОМ subprocess с фейковым pi-бинарником** (JSONL-парсинг, cost, env OM_WORKER, timeout), entry-smoke (хендлеры/команды/тул om_recall) | нет |
+| **Интеграция: пайплайн** | на MockRunner: chunk → observations (priority/provenance/quarantine) → pool → consolidate → tombstones → compact block (current-task, topK-бюджет), экстракторы (includePrevious), reflector (interval), recall (orchestrator), shared/seed | нет |
+| **MCP** | JSON-RPC-диспетчер (initialize/tools/call) без транспорта | нет |
+
+Все воркеры в тестах — `MockRunner` / фейковый pi-бинарник, поэтому CI и локальный
+`npm test` токены не расходуют.
+
+### Self-eval (`npm run eval`) — с реальным LLM, токены расходуется
+
+Единственная команда проекта, расходующая токены. Назначение: **регрессионный
+контроль качества памяти** — промпты (observer/consolidator/extractor/reflector)
+это фактический «модельный слой» проекта, и eval измеряет, что он реально выдаёт.
+
+Как работает:
+1. `npm run build` → запуск `eval/run.js`;
+2. читает скриптовые сессии из `eval/cases/*.json`: список реплик диалога
+   (`turns`) + `expectedFacts` — ключевые факты, которые обязаны выжить;
+3. прогоняет каждый кейс через **полный реальный пайплайн**: observers →
+   consolidation → extractors (настоящие subprocess-воркеры через `pi -p`,
+   модель из `OM_EVAL_MODEL`);
+4. пишет отчёт: `eval/report.json` + консольный отчёт с ✓/✗ по каждому факту
+   и списком слоёв, где он найден.
+
+Метрики:
+
+| Метрика | Что значит | Как читать |
+|---------|-----------|------------|
+| **facts x/y** (fact survival) | доля ключевых фактов кейса, **найденных в памяти** (наблюдения + темы + JOURNEY + extracted) после всего пайплайна | Главный показатель качества: 1.0 = ничего не потеряно. Промах = реальный разрыв (промпт/модель/пороги) — смотреть, в каких слоях факт не найден |
+| **obs N** | сколько наблюдений сформировано observers'ами | Sanity: N > 0 — observers сработали; N = 0 — баг порогов/воркера |
+| **topics N** | сколько долговременных тематических файлов создал consolidator | Для малых кейсов 0–2 нормально; 0 при N > 0 — consolidator ничего не записал |
+| **A→B tokens (×C)** | токены сырой истории (A) → токены памяти (B); C = A/B | C > 1 — память плотнее истории (компрессия). Для **малых** кейсов C < 1 — норма (фиксированный оверхед тем/JOURNEY/extracted превышает историю); компрессия проявляется в длинных сессиях |
+| **$ cost** | стоимость всех фоновых LLM-вызовов кейса (наблюдения + консолидация + экстракторы) | На локальной модели — 0.000; на облачной — ориентир для бюджета «стоимость памяти за сессию» |
+
+Интерпретация и правила:
+- **Вариативность модели**: локальная модель (и любой LLM) даёт разбег от прогона
+  к прогону (иногда создаёт тему, иногда нет; порядок фактов). Сравнивать eval
+  нужно **от прогона к прогону на той же модели**, а не с «идеалом».
+- **Если survival упал после изменений**: (1) откатить правки промптов
+  (`git stash`) и прогнать — восстановилось = регрессия в промпте;
+  (2) открыть `report.json` и посмотреть, в каких **слоях** факт потерян
+  (observation? topic? extracted?) — это укажет на виноватого воркера;
+  (3) точечно ужесточить промпт (правила «потерь нет»/supersede уже есть у
+  consolidator).
+- **Когда запускать**: после правок `src/core/prompts/*`, `worker-output.ts`,
+  chunker/порогов конфига, смены модели воркеров.
+- **Baseline** (22.09.2026, `qwen3.8-27b-dflash2` локально, cost $0.000):
+  **7/7 + 4/6 = 84%**; промахи — «русский язык» (факт не записан) и «reports»
+  (название модуля потеряно) — честные разрывы, не артефакты кейса.
+
+Env-параметры eval:
+
+```bash
+OM_EVAL_MODEL=qwen3.8-27b-dflash2 npm run eval  # модель всех воркеров (по умолч. claude-sonnet-4-6)
+OM_PI_BIN=...                 # бинарник pi для subprocess-воркеров (по умолч. pi)
+OM_EVAL_OBSERVER=...          # отдельная модель observer'а (опц.)
+OM_EVAL_CONSOLIDATOR=...      # отдельная модель consolidator/extractor/reflector (опц.)
+OM_EVAL_VERBOSE=1             # лог запусков/сбоев воркеров в stderr
+```
+
+Как расширить: добавить свой кейс в `eval/cases/<id>.json` (turns + expectedFacts)
+— подхватывается автоматически, новый кейс не требует правок кода.
 
 ## Известные ограничения
 
