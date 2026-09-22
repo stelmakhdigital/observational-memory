@@ -42,7 +42,15 @@ export function sanitizeName(name: string): string {
 }
 
 export class MemoryStore implements MemoryRoot {
-  constructor(private readonly root: string) {}
+  /**
+   * @param root durable memory root (<root>/<sessionId>/)
+   * @param opts.sharedDir project-level shared topics dir (v0.7); null/undefined
+   *   disables shared memory. Default: null (the session factory decides).
+   */
+  constructor(
+    private readonly root: string,
+    private readonly opts: { sharedDir?: string | null } = {},
+  ) {}
 
   sessionDir(sessionId: string): string {
     return path.join(this.root, sanitizeName(sessionId));
@@ -52,13 +60,13 @@ export class MemoryStore implements MemoryRoot {
     return existsSync(this.sessionDir(sessionId));
   }
 
-  seedFrom(parentSessionId: string, sessionId: string): boolean {
+  seedFrom(parentSessionId: string, sessionId: string, opts?: { force?: boolean }): boolean {
     if (parentSessionId === sessionId) return false;
     const parentDir = this.sessionDir(parentSessionId);
     const childDir = this.sessionDir(sessionId);
     const flag = path.join(childDir, SEED_FLAG);
     mkdirSync(childDir, { recursive: true });
-    if (existsSync(flag)) return false; // one-time seeding (FR-4.4)
+    if (!opts?.force && existsSync(flag)) return false; // one-time seeding (FR-4.4)
     if (existsSync(parentDir)) {
       for (const e of readdirSync(parentDir)) {
         if (e === SEED_FLAG || e === '.runs') continue; // skip transient state
@@ -111,6 +119,15 @@ export class MemoryStore implements MemoryRoot {
     }
     out.sort((a, b) => a.file.localeCompare(b.file));
     return out;
+  }
+
+  /** Durable topic file content (v0.5, recall). '' when missing. */
+  readTopic(sessionId: string, file: string): string {
+    try {
+      return readFileSync(path.join(this.sessionDir(sessionId), file), 'utf8');
+    } catch {
+      return '';
+    }
   }
 
   readJourney(sessionId: string): string {
@@ -170,6 +187,48 @@ export class MemoryStore implements MemoryRoot {
       for (const t of topics)
         lines.push(`- **${t.topic}** — ${t.description || '(no description)'} [${t.file}]`);
     writeFileSync(path.join(dir, INDEX_FILE), lines.join('\n') + '\n', 'utf8');
+  }
+
+  // ---- shared project-level memory (v0.7) ---------------------------------
+
+  sharedDir(): string | null {
+    return this.opts.sharedDir ?? null;
+  }
+
+  listSharedTopics(): TopicSummary[] {
+    const dir = this.sharedDir();
+    if (!dir) return [];
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return [];
+    }
+    const out: TopicSummary[] = [];
+    for (const e of entries) {
+      if (!e.endsWith('.md') || e === INDEX_FILE || e === JOURNEY_FILE) continue;
+      const content = this.readSharedTopic(e);
+      if (!content) continue;
+      const fm = parseFrontMatter(content);
+      out.push({
+        file: e,
+        topic: fm['topic'] ?? e.replace(/\.md$/, ''),
+        description: fm['description'] ?? '',
+        session: 'shared',
+      });
+    }
+    out.sort((a, b) => a.file.localeCompare(b.file));
+    return out;
+  }
+
+  readSharedTopic(file: string): string {
+    const dir = this.sharedDir();
+    if (!dir) return '';
+    try {
+      return readFileSync(path.join(dir, file), 'utf8');
+    } catch {
+      return '';
+    }
   }
 }
 

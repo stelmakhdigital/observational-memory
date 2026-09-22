@@ -18,6 +18,7 @@ export function sumCosts(entries: readonly TypedLedgerEntry<'om.cost'>[]): CostS
     observer: { usd: 0, runs: 0 },
     consolidator: { usd: 0, runs: 0 },
     extractor: { usd: 0, runs: 0 },
+    reflect: { usd: 0, runs: 0 },
   };
   let totalUsd = 0;
   let runs = 0;

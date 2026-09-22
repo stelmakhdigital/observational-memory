@@ -19,12 +19,25 @@ describe('renderPool', () => {
   it('is deterministic (commit order, stable format)', () => {
     const o = [obs('om-1', 'm1'), obs('om-2', 'm2')];
     expect(renderPool(o)).toBe(renderPool([...o]));
-    expect(renderPool(o)).toBe('[om-1] c-om-1\n[om-2] c-om-2');
+    // v0.4: no priority field → routine → '· ' marker
+    expect(renderPool(o)).toBe('[om-1] · c-om-1\n[om-2] · c-om-2');
+  });
+
+  it('renders priority and quarantine markers (v0.4/v0.6)', () => {
+    const o = [
+      { ...obs('om-1', 'm1', 'critical note'), priority: 'critical' as const },
+      { ...obs('om-2', 'm1', 'important note'), priority: 'important' as const },
+      { ...obs('om-3', 'm1', 'routine note'), priority: 'routine' as const },
+      { ...obs('om-4', 'm1', 'weird note'), quarantined: true },
+    ];
+    expect(renderPool(o)).toBe(
+      '[om-1] ! critical note\n[om-2] important note\n[om-3] · routine note\n[om-4] [UNVERIFIED] · weird note',
+    );
   });
 
   it('normalizes whitespace inside content', () => {
     const o = [obs('om-1', 'm1', 'a\n\n  b')];
-    expect(renderPool(o)).toBe('[om-1] a b');
+    expect(renderPool(o)).toBe('[om-1] · a b');
   });
 
   it('empty pool → empty string', () => {

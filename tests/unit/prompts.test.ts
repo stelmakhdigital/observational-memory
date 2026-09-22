@@ -16,7 +16,10 @@ END_OBSERVATIONS
 Done!`;
     const r = parseObserverOutput(out);
     expect(r.ok).toBe(true);
-    expect(r.observations).toEqual(['Decided to use vitest', 'Fixed bug in foo.ts (line 42)']);
+    expect(r.observations).toEqual([
+      { text: 'Decided to use vitest', priority: 'routine' },
+      { text: 'Fixed bug in foo.ts (line 42)', priority: 'routine' },
+    ]);
   });
 
   it('handles "(no observations)"', () => {
@@ -28,13 +31,26 @@ Done!`;
   it('falls back to bullets without the strict block', () => {
     const r = parseObserverOutput('Here are notes:\n- a note\n* another\n');
     expect(r.ok).toBe(true);
-    expect(r.observations).toEqual(['a note', 'another']);
+    expect(r.observations).toEqual([
+      { text: 'a note', priority: 'routine' },
+      { text: 'another', priority: 'routine' },
+    ]);
+  });
+
+  it('parses priority tags P0/P1/P2 (v0.4)', () => {
+    const r = parseObserverOutput('OBSERVATIONS\n- [P0] critical decision\n- [P1] completed work\n- [P2] routine detail\nEND_OBSERVATIONS');
+    expect(r.ok).toBe(true);
+    expect(r.observations).toEqual([
+      { text: 'critical decision', priority: 'critical' },
+      { text: 'completed work', priority: 'important' },
+      { text: 'routine detail', priority: 'routine' },
+    ]);
   });
 
   it('keeps a short bare paragraph as a single observation', () => {
     const r = parseObserverOutput('User prefers dark mode in the editor.');
     expect(r.ok).toBe(true);
-    expect(r.observations).toEqual(['User prefers dark mode in the editor.']);
+    expect(r.observations).toEqual([{ text: 'User prefers dark mode in the editor.', priority: 'routine' }]);
   });
 
   it('returns ok=false for empty/garbage output', () => {

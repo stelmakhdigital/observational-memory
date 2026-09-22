@@ -11,13 +11,22 @@ import type { CompactionBlock, Observation } from '../types.js';
 
 /**
  * Render active observations as a verbatim, deterministic block.
- * Order = commit order (stable). Format is stable for prompt caching (NFR).
+ * Order = whatever the caller passed (orchestrator sorts by priority, v0.4).
+ * Priority/quarantine markers are explicit so the agent sees trust levels:
+ *   [id] ! text      — critical (P0)
+ *   [id] text        — important (P1) / unknown
+ *   [id] · text      — routine (P2)
+ *   [id] [UNVERIFIED] text — quarantined by the anti-poisoning sanitizer (v0.6).
+ * Format is stable for prompt caching (NFR).
  */
 export function renderPool(observations: readonly Observation[]): string {
   if (observations.length === 0) return '';
   const lines = observations.map((o) => {
     const flat = o.content.replace(/\s*\n[ \t]*(?:\n[ \t]*)*/g, ' ').trim();
-    return `[${o.id}] ${flat}`;
+    const pr = o.priority ?? 'routine';
+    const marker = pr === 'critical' ? '! ' : pr === 'routine' ? '· ' : '';
+    const q = o.quarantined ? '[UNVERIFIED] ' : '';
+    return `[${o.id}] ${q}${marker}${flat}`;
   });
   return lines.join('\n');
 }
@@ -48,14 +57,20 @@ export interface BlockInputs {
   journey: string;
   verbatimTail: string;
   gapMarkers: string;
+  /** Built-in current-task value rendered at the head (v0.4); '' when absent. */
+  currentTask?: string;
   generatedAt: string;
 }
 
 const H = '='.repeat(48);
 
 export function renderCompactionBlock(i: BlockInputs): CompactionBlock {
+  const currentTask = (i.currentTask ?? '').trim();
   const parts: string[] = [];
   parts.push(`${H}\nOBSERVATIONAL MEMORY\n${H}`);
+  if (currentTask) {
+    parts.push(`--- current task ---\n${currentTask}`);
+  }
   if (i.gapMarkers.trim()) {
     parts.push(`--- temporal anchors ---\n${i.gapMarkers.trim()}`);
   }
@@ -73,6 +88,7 @@ export function renderCompactionBlock(i: BlockInputs): CompactionBlock {
     observations: renderPool(i.observations),
     memoryMap: i.memoryMap,
     journey: i.journey,
+    currentTask,
     verbatimTail: i.verbatimTail,
     gapMarkers: i.gapMarkers,
     text: parts.join('\n\n'),

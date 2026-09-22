@@ -80,9 +80,11 @@ describe('parseExtractorOutput', () => {
 });
 
 describe('extractors config', () => {
-  it('has a default "profile" extractor', () => {
-    expect(DEFAULT_CONFIG.extractors.map((e) => e.id)).toEqual(['profile']);
+  it('has default built-in extractors (v0.4)', () => {
+    expect(DEFAULT_CONFIG.extractors.map((e) => e.id)).toEqual(['profile', 'current-task']);
     expect(resolveConfig(null).extractors[0]!.id).toBe('profile');
+    // incremental update by default (Mastra includePreviousExtraction)
+    expect(resolveConfig(null).extractors.every((e) => e.includePrevious !== false)).toBe(true);
   });
 
   it('validates ids (format + duplicates) and required fields', () => {

@@ -15,6 +15,7 @@ const args = process.argv.slice(2);
 const prompt = args[args.indexOf('--') + 1] ?? '';
 const isObserver = prompt.includes('OBSERVER');
 const isExtractor = prompt.includes('EXTRACTOR');
+const isReflect = prompt.includes('REFLECTOR');
 fs.writeFileSync('invocation.json', JSON.stringify({
   omWorker: process.env.OM_WORKER,
   omWorkerDir: process.env.OM_WORKER_DIR,
@@ -27,10 +28,13 @@ lines.push(JSON.stringify({ type: 'session', version: 3, id: 'w1', timestamp: 't
 lines.push(JSON.stringify({ type: 'agent_start' }));
 lines.push(JSON.stringify({ type: 'message_update', usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0, total: 0.003 } } }));
 const extractorText = 'EXTRACTED_JSON\\n{"profile": {"lang": "ru"}}\\nEND_EXTRACTED_JSON';
+const reflectText = 'REFLECTION_REPORT\\ntopics: merged.md\\njourney_changed: true\\nEND_REFLECTION_REPORT';
 const text = isExtractor
   ? extractorText
   : isObserver
-  ? 'OBSERVATIONS\\n- fake obs 1\\n- fake obs 2\\nEND_OBSERVATIONS'
+  ? 'OBSERVATIONS\\n- [P1] fake obs 1\\n- [P2] fake obs 2\\nEND_OBSERVATIONS'
+  : isReflect
+  ? reflectText
   : 'CONSOLIDATION_REPORT\\ntopics: a.md, b.md\\njourney_changed: true\\nconsumed: om-1, om-2\\ndropped: none\\nEND_CONSOLIDATION_REPORT';
 lines.push(JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text }] } }));
 lines.push(JSON.stringify({ type: 'agent_end', messages: [] }));
@@ -110,8 +114,24 @@ describe('PiSubprocessRunner', () => {
       chunk: { text: 'history', overlapContext: '', coversUpToId: 'm1' },
     });
     expect(r.ok).toBe(true);
-    expect(r.observations).toEqual(['fake obs 1', 'fake obs 2']);
+    expect(r.observations).toEqual([
+      { text: 'fake obs 1', priority: 'important' },
+      { text: 'fake obs 2', priority: 'routine' },
+    ]);
     expect(r.costUsd).toBe(0.003);
+  });
+
+  it('runs a reflect subprocess and parses the reflection report (v0.6)', async () => {
+    const r = await makeRunner().run('reflect', {
+      runId: 'run-refl',
+      role: 'reflect',
+      reflect: { sessionDir: dir, topics: ['a.md'], journey: 'old' },
+    });
+    expect(r.ok).toBe(true);
+    expect(r.reflection).toEqual({ topics: ['merged.md'], journeyChanged: true });
+    const inv = JSON.parse(readFileSync(path.join(dir, 'invocation.json'), 'utf8'));
+    expect(inv.omWorker).toBe('reflect');
+    expect(inv.omWorkerDir).toBe(dir);
   });
 
   it('runs a consolidator subprocess and parses the report', async () => {

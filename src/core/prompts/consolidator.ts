@@ -39,6 +39,10 @@ ${pool.sessionDir}, then report exactly which observation ids you consumed.
 - Consume ALL observations listed below; their content must live in a topic file
   (merged/summarized, no loss of key specifics) or be explicitly dropped as
   superseded (mention superseded ids in your report).
+- SUPERSEDE, NEVER SILENTLY OVERWRITE: when a new observation contradicts what is
+  already in a topic file, keep BOTH — mark the old fact inline as
+  'superseded (<date>): <old> -> <new>' and keep the current value stated plainly.
+  History is memory, not a changelog to erase.
 - Do not invent facts that are not in the observations.
 - Use your read/write/edit/ls/grep tools (scoped to the session dir).
 

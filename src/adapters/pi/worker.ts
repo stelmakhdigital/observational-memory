@@ -8,6 +8,8 @@
  *  - consolidator: registers ONLY scoped read/write/edit/ls/grep contained in
  *                  the session memory dir (env OM_WORKER_DIR). No bash, no
  *                  writes outside the dir (v1.1 scope hardening).
+ *  - reflect:      same scoped tools as consolidator (v0.6): it reorganizes
+ *                  durable memory files inside the session dir only.
  *
  * This file must stay import-light (pi loads it with jiti inside the worker).
  */
@@ -16,7 +18,7 @@ import type { PiApi } from './types.js';
 
 export default function omWorker(pi: PiApi): void {
   const role = process.env.OM_WORKER;
-  if (role !== 'consolidator') return; // observer (or unset): no tools
+  if (role !== 'consolidator' && role !== 'reflect') return; // observer (or unset): no tools
   const dir = process.env.OM_WORKER_DIR ?? process.cwd();
   for (const tool of createScopedFileTools(dir)) {
     pi.registerTool(tool as never);

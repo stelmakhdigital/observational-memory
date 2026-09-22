@@ -17,6 +17,13 @@ export interface PiAdapterConfig {
   workerTimeoutMs: number;
   /** Memory root: <cwd>/.memory by default. */
   memoryDir: string;
+  /**
+   * Attachment observation mode (v0.7): how non-text message parts are
+   * rendered into observed history. 'auto' (default) → named placeholders
+   * like `[image: board.png]`; 'off' → attachments are omitted. Real image
+   * forwarding is not supported by the text worker runner (documented).
+   */
+  attachments: 'auto' | 'off';
 }
 
 interface RawNamespace {
@@ -24,9 +31,12 @@ interface RawNamespace {
   models?: {
     observer?: Partial<PiModelRef>;
     consolidator?: Partial<PiModelRef>;
+    extractor?: Partial<PiModelRef>;
+    reflect?: Partial<PiModelRef>;
   };
   piBinary?: string;
   workerTimeoutMs?: number;
+  attachments?: string;
 }
 
 function readJson(file: string): unknown {
@@ -52,11 +62,11 @@ export function loadPiAdapterConfig(
   const globalNs = namespaceOf(readJson(path.join(home, '.pi', 'agent', 'settings.json')));
   const projectNs = namespaceOf(readJson(path.join(cwd, '.pi', 'settings.json')));
   const merged = mergeDeep<RawNamespace>(
-    { models: { observer: {}, consolidator: {} } },
+    { models: { observer: {}, consolidator: {}, extractor: {}, reflect: {} } },
     mergeDeep<RawNamespace>(globalNs ?? {}, projectNs ?? {}),
   );
 
-  const { piBinary, workerTimeoutMs, ...omPartial } = merged;
+  const { piBinary, workerTimeoutMs, attachments, ...omPartial } = merged;
   const om = resolveConfig(omPartial as unknown as Partial<OmConfig>);
 
   return {
@@ -69,5 +79,6 @@ export function loadPiAdapterConfig(
           ? workerTimeoutMs
           : 10 * 60 * 1000,
     memoryDir: path.join(cwd, '.memory'),
+    attachments: attachments === 'off' ? 'off' : 'auto',
   };
 }

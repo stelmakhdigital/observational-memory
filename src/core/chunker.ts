@@ -32,6 +32,8 @@ export interface Chunk {
   text: string;
   overlapContext: string;
   coversUpToId: string;
+  /** Provenance (v0.5): id of the FIRST message in the slice. */
+  fromId: string;
   tokens: number;
 }
 
@@ -105,6 +107,7 @@ export class MessageChunker {
       text,
       overlapContext,
       coversUpToId,
+      fromId: slice[0]!.id,
       tokens: slice.reduce((s, m) => s + this.tokensOf(m), 0),
     };
   }

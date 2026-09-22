@@ -5,11 +5,13 @@ import ext from '../../src/adapters/pi/index.js';
 function makePi() {
   const handlers = new Map<string, unknown>();
   const commands = new Map<string, unknown>();
+  const tools = new Map<string, unknown>();
   const appended: unknown[] = [];
   const sent: unknown[] = [];
   return {
     handlers,
     commands,
+    tools,
     appended,
     sent,
     pi: {
@@ -25,6 +27,9 @@ function makePi() {
       registerCommand: (name: string, opts: unknown) => {
         commands.set(name, opts);
       },
+      registerTool: (t: { name: string }) => {
+        tools.set(t.name, t);
+      },
     } as never,
   };
 }
@@ -35,14 +40,16 @@ describe('pi adapter entry (smoke)', () => {
   });
 
   it('registers the expected event handlers and commands', () => {
-    const { pi, handlers, commands } = makePi();
+    const { pi, handlers, commands, tools } = makePi();
     ext(pi);
     for (const ev of ['session_start', 'turn_end', 'agent_end', 'session_before_compact', 'session_shutdown']) {
       expect(handlers.has(ev), `handler ${ev}`).toBe(true);
     }
-    for (const cmd of ['om', 'om:status', 'om:compact', 'om:consolidate', 'om:extract']) {
+    for (const cmd of ['om', 'om:status', 'om:compact', 'om:consolidate', 'om:extract', 'om:recall', 'om:reflect', 'om:seed-from']) {
       expect(commands.has(cmd), `command ${cmd}`).toBe(true);
     }
+    // v0.5: the agent-facing recall tool is registered at boot
+    expect(tools.has('om_recall')).toBe(true);
   });
 
   it('boot is lazy: no ledger writes until a session event', () => {

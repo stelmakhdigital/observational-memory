@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createOmSession } from '../../src/core/session.js';
 import { resolveConfig, type OmConfig } from '../../src/core/config.js';
 import type { CompactionBlock, EventSink, WorkerInput } from '../../src/core/types.js';
-import { MockHistory, MockRunner } from '../fixtures/mocks.js';
+import { MockHistory, MockRunner, drafts } from '../fixtures/mocks.js';
 
 const baseConfig: OmConfig = resolveConfig({
   chunkTokens: 10,
@@ -22,7 +22,7 @@ function makeRunner() {
         runId: input.runId,
         ok: true,
         costUsd: 0.01,
-        observations: [`obs from ${input.chunk!.coversUpToId}`],
+        observations: drafts(`obs from ${input.chunk!.coversUpToId}`),
       }),
     },
     {

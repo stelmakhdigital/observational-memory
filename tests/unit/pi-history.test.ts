@@ -45,6 +45,22 @@ describe('messageText', () => {
     expect(t).toContain('[image]');
     expect(t).toContain('[tool: bash]');
   });
+
+  it('attachment gates (v0.7): named placeholders in auto mode, omitted in off mode', () => {
+    const content = [
+      { type: 'text', text: 'look at the mockup' },
+      { type: 'image', name: 'board.png' },
+      { type: 'file', name: 'spec.pdf' },
+    ];
+    const auto = messageText({ role: 'user', content } as never, { attachments: 'auto' });
+    expect(auto).toContain('[image: board.png]');
+    expect(auto).toContain('[file: spec.pdf]');
+    const off = messageText({ role: 'user', content } as never, { attachments: 'off' });
+    expect(off).toBe('user: look at the mockup');
+    // anonymous attachments degrade to bare placeholders in auto mode
+    const anon = messageText({ role: 'user', content: [{ type: 'image' }] } as never);
+    expect(anon).toContain('[image]');
+  });
   it('handles tool results', () => {
     expect(messageText({ role: 'toolResult', toolName: 'bash', content: 'ok' } as never)).toBe(
       '[tool result: bash] ok',

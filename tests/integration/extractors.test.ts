@@ -6,7 +6,7 @@ import { OmOrchestrator } from '../../src/core/orchestrator.js';
 import { resolveConfig, type OmConfig } from '../../src/core/config.js';
 import { MemoryStore } from '../../src/core/memory-store.js';
 import type { EventSink, WorkerInput } from '../../src/core/types.js';
-import { MockHistory, MockLedger, MockRunner } from '../fixtures/mocks.js';
+import { MockHistory, MockLedger, MockRunner, drafts } from '../fixtures/mocks.js';
 
 const baseConfig: OmConfig = resolveConfig({
   chunkTokens: 10,
@@ -25,7 +25,7 @@ function makeRunner(profileValue: Record<string, unknown>) {
         runId: input.runId,
         ok: true,
         costUsd: 0.01,
-        observations: [`obs from ${input.chunk!.coversUpToId}`],
+        observations: drafts(`obs from ${input.chunk!.coversUpToId}`),
       }),
     },
     {
@@ -107,7 +107,7 @@ describe('extractors (orchestrator integration)', () => {
     expect(extractedCalls.length).toBe(1);
     // observations were passed newest-first with specs
     const input = extractedCalls[0]!.input;
-    expect(input.extract!.specs.map((s) => s.id)).toEqual(['profile']);
+    expect(input.extract!.specs.map((s) => s.id)).toEqual(['profile', 'current-task']);
     expect(input.extract!.observations.length).toBeGreaterThan(0);
 
     const file = path.join(dir, S, 'extracted', 'profile.json');

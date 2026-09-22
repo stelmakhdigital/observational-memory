@@ -9,7 +9,7 @@
  * Failures never break the master session (NFR-1): one retry, then the error
  * is recorded (om.lastError) and visible in status.
  */
-import { foldPool, oldestAbove } from './ledger/pool.js';
+import { foldPool, oldestAbove, orderByPriority, trimToBudget } from './ledger/pool.js';
 import { progressOf } from './ledger/progress.js';
 import { renderCompactionBlock, selectBeforeTail } from './ledger/render.js';
 import { renderMemoryMap } from './memory-store.js';
@@ -17,6 +17,8 @@ import { detectGap, gapMarkerId, renderGapMarkers } from './gap-markers.js';
 import { sumCosts } from './cost.js';
 import { estimateTokens } from './tokens.js';
 import { nextObservationId, newRunId } from './ids.js';
+import { sanitizeObservation } from './sanitize.js';
+import { recallSearch, renderRecallHits, buildSessionRecallDocs, type RecallHit, type RecallOptions } from './recall.js';
 import { OmError } from './types.js';
 import type {
   Clock,
@@ -34,6 +36,46 @@ import type {
   WorkerResult,
 } from './types.js';
 import type { OmConfig } from './config.js';
+
+/** Built-in extractor id rendered at the head of the compaction block (v0.4). */
+export const CURRENT_TASK_EXTRACTOR_ID = 'current-task';
+
+/**
+ * Render the current-task value (v0.4) deterministically:
+ *  - string → as-is;
+ *  - object → preferred fields (task, pending, nextStep, asOf, blocker),
+ *    the rest appended as compact JSON (nothing is lost);
+ *  - other → JSON.
+ */
+export function renderCurrentTask(value: unknown): string {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    const v = { ...(value as Record<string, unknown>) };
+    const lines: string[] = [];
+    const take = (k: string) => {
+      const val = v[k];
+      if (typeof val === 'string' && val.trim()) {
+        lines.push(`${k === 'asOf' ? 'as of' : k}: ${val.trim()}`);
+        delete v[k];
+      }
+    };
+    take('task');
+    take('blocker');
+    take('nextStep');
+    take('asOf');
+    const pending = v.pending;
+    if (Array.isArray(pending) && pending.length > 0) {
+      lines.push(`pending: ${pending.map((p) => String(p)).join('; ')}`);
+      delete v.pending;
+    }
+    const rest = Object.entries(v).filter(([, val]) => val !== undefined && val !== null);
+    if (rest.length > 0) lines.push(JSON.stringify(Object.fromEntries(rest), null, 2));
+    return lines.join('\n');
+  }
+  return JSON.stringify(value, null, 2);
+}
 
 export interface OrchestratorDeps {
   config: OmConfig;
@@ -72,6 +114,8 @@ export class OmOrchestrator {
   private lastGapMarkedFor: Date | null = null;
   private compactedForTokens = 0;
   private earlyTimer: ReturnType<typeof setTimeout> | null = null;
+  private reflectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reflecting = false;
 
   constructor(private readonly d: OrchestratorDeps) {
     this.cfg = d.config;
@@ -172,12 +216,13 @@ export class OmOrchestrator {
     if (!chunk) return;
     if (this.pendingChunks.has(chunk.coversUpToId)) return;
     this.log(`early chunk: ${chunk.tokens} tokens up to ${chunk.coversUpToId}`);
-    this.startObserver(chunk.coversUpToId, chunk.text, chunk.overlapContext);
+    this.startObserver(chunk.coversUpToId, chunk.text, chunk.overlapContext, chunk.fromId);
   }
 
   async onAgentEnd(): Promise<void> {
     if (!this.enabled || this.cfg.passive) return;
     this.maybeMarkGap();
+    this.scheduleReflectIdleCheck();
     const tokens = this.d.history.currentTokens();
     if (tokens >= this.cfg.compactAtContextTokens && tokens > this.compactedForTokens) {
       if (this.d.history.isIdle()) {
@@ -219,27 +264,28 @@ export class OmOrchestrator {
       // one observer per slice: the watermark moves only after the commit,
       // so the same slice would otherwise be launched up to `concurrency` times
       if (this.pendingChunks.has(chunk.coversUpToId)) return;
-      this.startObserver(chunk.coversUpToId, chunk.text, chunk.overlapContext);
+      this.startObserver(chunk.coversUpToId, chunk.text, chunk.overlapContext, chunk.fromId);
     }
   }
 
-  private startObserver(coversUpToId: string, text: string, overlapContext: string): void {
+  private startObserver(coversUpToId: string, text: string, overlapContext: string, fromId?: string): void {
     const runId = newRunId();
     const input: WorkerInput = {
       runId,
       role: 'observer',
-      chunk: { coversUpToId, text, overlapContext },
+      chunk: { coversUpToId, text, overlapContext, ...(fromId ? { fromId } : {}) },
     };
     this.pendingChunks.add(coversUpToId);
-    const task = this.runWorker(input, (res) => this.commitObservations(runId, coversUpToId, res)).finally(
-      () => {
-        this.pendingChunks.delete(coversUpToId);
-      },
-    );
+    const task = this.runWorker(
+      input,
+      (res) => this.commitObservations(runId, coversUpToId, fromId, res),
+    ).finally(() => {
+      this.pendingChunks.delete(coversUpToId);
+    });
     this.trackTask(runId, 'observer', this.now().toISOString(), task);
   }
 
-  private commitObservations(runId: string, coversUpToId: string, res: WorkerResult): void {
+  private commitObservations(runId: string, coversUpToId: string, fromId: string | undefined, res: WorkerResult): void {
     if (!this.enabled) {
       this.log(`discarding observations of ${runId} (disabled mid-run)`);
       return;
@@ -247,7 +293,12 @@ export class OmOrchestrator {
     const parsed = res.observations ?? [];
     if (parsed.length === 0) return;
     const at = this.now().toISOString();
-    for (const content of parsed) {
+    const sourceRange = fromId ? { fromId, toId: coversUpToId } : undefined;
+    for (const draft of parsed) {
+      const text = (draft?.text ?? '').trim();
+      if (!text) continue;
+      const { quarantined, matched } = sanitizeObservation(text);
+      if (quarantined) this.log(`observation quarantined (injection-like, ${matched})`);
       const lastSeq = this.maxSeqForSecond();
       const id = nextObservationId({ lastSeq, now: () => this.now().getTime() });
       this.d.ledger.append({
@@ -255,9 +306,12 @@ export class OmOrchestrator {
         data: {
           id,
           coversUpToId,
-          content,
-          tokenCount: this.estimate(content),
+          content: text,
+          tokenCount: this.estimate(text),
           createdAt: at,
+          priority: draft?.priority ?? 'routine',
+          ...(quarantined ? { quarantined: true } : {}),
+          ...(sourceRange ? { sourceRange } : {}),
         },
         at,
         meta: { runId },
@@ -305,6 +359,7 @@ export class OmOrchestrator {
         observations: pool.observations.slice(0, oldest.ids.length),
         sessionDir: this.d.memory.sessionDir(this.sessionId),
         journey: this.d.memory.readJourney(this.sessionId),
+        sharedTopics: this.sharedTopicsLine(),
       },
     };
     const task = this.runWorker(input, (res) => this.commitConsolidation(runId, oldest.ids, res));
@@ -314,6 +369,19 @@ export class OmOrchestrator {
         this.emitStatus();
       }),
     );
+  }
+
+  /** Shared (project-level) topics as a reference line for the consolidator (v0.7). */
+  private sharedTopicsLine(): string {
+    try {
+      const shared = this.d.memory.listSharedTopics();
+      if (shared.length === 0) return '';
+      return shared
+        .map((t) => `- ${t.topic}${t.description ? `: ${t.description}` : ''}`)
+        .join('\n');
+    } catch {
+      return '';
+    }
   }
 
   private commitConsolidation(runId: string, allowedIds: string[], res: WorkerResult): void {
@@ -372,6 +440,9 @@ export class OmOrchestrator {
     this.extracting = true;
     const current: Record<string, unknown> = {};
     for (const spec of this.cfg.extractors) {
+      // includePrevious (v0.4, Mastra-style): by default the extractor sees the
+      // stored value and merges incrementally; opt-out per spec.
+      if (spec.includePrevious === false) continue;
       const v = this.d.memory.loadExtracted(this.sessionId, spec.id);
       if (v !== undefined) current[spec.id] = v;
     }
@@ -464,6 +535,7 @@ export class OmOrchestrator {
         observations: pool.observations.slice(0, oldest.ids.length),
         sessionDir: this.d.memory.sessionDir(this.sessionId),
         journey: this.d.memory.readJourney(this.sessionId),
+        sharedTopics: this.sharedTopicsLine(),
       },
     };
     const task = this.runWorker(input, (res) => this.commitConsolidation(runId, oldest.ids, res));
@@ -473,6 +545,82 @@ export class OmOrchestrator {
         this.emitStatus();
       }),
     );
+  }
+
+  // ---- reflector (v0.6, sleep-time) -----------------------------------------
+
+  /**
+   * Sleep-time reflector (Letta-style): while the session is idle for
+   * reflector.idleMs and the last reflect pass is older than minIntervalMs,
+   * a 'reflect' worker reorganizes durable memory (topic merge/rename,
+   * JOURNEY compression). Rare and rate-limited by design.
+   */
+  private scheduleReflectIdleCheck(): void {
+    if (!this.cfg.reflector.enabled) return;
+    if (this.reflectTimer) clearTimeout(this.reflectTimer);
+    this.reflectTimer = setTimeout(() => {
+      this.reflectTimer = null;
+      this.maybeReflect();
+    }, this.cfg.reflector.idleMs);
+    (this.reflectTimer as { unref?: () => void }).unref?.();
+  }
+
+  private maybeReflect(): void {
+    try {
+      if (!this.enabled || this.cfg.passive || this.reflecting) return;
+      if (!this.d.history.isIdle()) return;
+      if (this.lastReflectAt() !== null &&
+        this.now().getTime() - this.lastReflectAt()! < this.cfg.reflector.minIntervalMs) {
+        return;
+      }
+      this.forceReflect();
+    } catch (e) {
+      this.log(`reflect check failed: ${String(e)}`);
+    }
+  }
+
+  private lastReflectAt(): number | null {
+    let last: number | null = null;
+    for (const e of this.d.ledger.read<'om.run'>('om.run')) {
+      if (e.data.role !== 'reflect') continue;
+      const t = new Date(e.data.at).getTime();
+      if (Number.isFinite(t) && (last === null || t > last)) last = t;
+    }
+    return last;
+  }
+
+  forceReflect(): void {
+    if (!this.enabled || this.reflecting) return;
+    this.reflecting = true;
+    const topics = this.d.memory.listTopics(this.sessionId).map((t) => t.file);
+    const runId = newRunId();
+    const input: WorkerInput = {
+      runId,
+      role: 'reflect',
+      reflect: {
+        sessionDir: this.d.memory.sessionDir(this.sessionId),
+        topics,
+        journey: this.d.memory.readJourney(this.sessionId),
+        sharedTopics: this.sharedTopicsLine(),
+      },
+    };
+    const task = this.runWorker(input, (res) => this.commitReflection(runId, res));
+    this.trackTask(runId, 'reflect', this.now().toISOString(),
+      task.finally(() => {
+        this.reflecting = false;
+        this.emitStatus();
+      }),
+    );
+    this.log(`reflect pass started (topics: ${topics.length})`);
+  }
+
+  private commitReflection(runId: string, res: WorkerResult): void {
+    if (!this.enabled) return;
+    const r = res.reflection;
+    if (r) {
+      this.d.memory.renderIndex(this.sessionId);
+      this.log(`reflection ${runId}: touched ${r.topics.length} topics, journeyChanged=${r.journeyChanged}`);
+    }
   }
 
   compactBlock(): CompactionBlock {
@@ -488,7 +636,13 @@ export class OmOrchestrator {
     const pool = this.pool();
     const prog = this.watermark();
     const tailBoundaryId = this.d.history.tailStartIdFor?.(this.cfg.tailTokens) ?? prog.coversUpToId;
-    const observations = selectBeforeTail(pool.observations, tailBoundaryId);
+    let observations = selectBeforeTail(pool.observations, tailBoundaryId);
+    // v0.5: deterministic injection modes — topK trims by priority budget.
+    if (this.cfg.compaction.inject === 'topK') {
+      observations = trimToBudget(observations, this.cfg.compaction.topKBudgetTokens);
+    }
+    // v0.4: render priority-ordered (critical → important → routine).
+    observations = orderByPriority(observations);
     const memoryMap = renderMemoryMap(this.d.memory.listTopics(this.sessionId));
     const journey = this.d.memory.readJourney(this.sessionId);
     const verbatimTail = this.d.history.tailVerbatim(tailBoundaryId, this.cfg.tailTokens);
@@ -498,15 +652,37 @@ export class OmOrchestrator {
       ms: e.data.ms,
       humanDuration: e.data.humanDuration,
     }));
+    // v0.4: built-in current-task value at the head of the block.
+    const currentTask = renderCurrentTask(
+      this.d.memory.loadExtracted(this.sessionId, CURRENT_TASK_EXTRACTOR_ID),
+    );
     const block = renderCompactionBlock({
       observations,
       memoryMap,
       journey,
       verbatimTail,
       gapMarkers: renderGapMarkers(gaps),
+      currentTask,
       generatedAt: this.now().toISOString(),
     });
     return { block, tailBoundaryId };
+  }
+
+  // ---- recall (v0.5) ---------------------------------------------------------
+
+  /**
+   * Deterministic memory search (BM25-lite over observations, topics,
+   * journey, extracted values; temporal filters supported). No LLM.
+   */
+  recall(query: string, opts: RecallOptions = {}): RecallHit[] {
+    return recallSearch(buildSessionRecallDocs(this.d.ledger, this.d.memory, this.sessionId), query, opts);
+  }
+
+  /** Recall rendered for tool/command output. */
+  recallText(query: string, opts: RecallOptions = {}): string {
+    const hits = this.recall(query, opts);
+    const rendered = renderRecallHits(hits, { sessionId: this.sessionId });
+    return rendered || '(no matches in memory)';
   }
 
   // ---- shared reads ----------------------------------------------------------
@@ -639,6 +815,8 @@ export class OmOrchestrator {
   async shutdown(): Promise<void> {
     if (this.earlyTimer) clearTimeout(this.earlyTimer);
     this.earlyTimer = null;
+    if (this.reflectTimer) clearTimeout(this.reflectTimer);
+    this.reflectTimer = null;
     // Quiescent drain (see runCompaction): follow-up workers spawned while
     // draining must be awaited too.
     for (;;) {

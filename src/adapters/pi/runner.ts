@@ -12,11 +12,13 @@
  * practice: it returns JSON, files are written by the core).
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { parseConsolidationReport, parseExtractorOutput, parseObserverOutput } from '../../core/worker-output.js';
+import { parseConsolidationReport, parseExtractorOutput, parseObserverOutput, parseReflectionReport } from '../../core/worker-output.js';
 import { renderObserverPrompt } from '../../core/prompts/observer.js';
 import { renderConsolidatorPrompt } from '../../core/prompts/consolidator.js';
 import { renderExtractorPrompt } from '../../core/prompts/extractor.js';
+import { renderReflectPrompt } from '../../core/prompts/reflector.js';
 import type {
   ModelRunner,
   Role,
@@ -33,8 +35,12 @@ export interface PiSubprocessRunnerOptions {
   consolidatorModel: ModelRef;
   /** Defaults to consolidatorModel when absent. */
   extractorModel?: ModelRef;
+  /** Defaults to consolidatorModel when absent (v0.6). */
+  reflectModel?: ModelRef;
   sessionLabel?: string;
   journeyTargetTokens?: number;
+  /** v0.4: priority-tag instructions in the observer prompt. */
+  priorityEnabled?: boolean;
   timeoutMs?: number;
   debug?: (msg: string) => void;
 }
@@ -88,23 +94,37 @@ export class PiSubprocessRunner implements ModelRunner {
   private readonly workerExt: string;
 
   constructor(private readonly o: PiSubprocessRunnerOptions) {
-    this.workerExt = fileURLToPath(new URL('./worker.ts', import.meta.url));
+    // Worker extension: source tree runs (pi/jiti) load worker.ts; built
+    // dist/ runs (eval, npm scripts) load worker.js. Prefer whichever exists.
+    const ts = fileURLToPath(new URL('./worker.ts', import.meta.url));
+    const js = fileURLToPath(new URL('./worker.js', import.meta.url));
+    this.workerExt = existsSync(ts) ? ts : js;
   }
 
   async run(role: Role, input: WorkerInput): Promise<WorkerResult> {
     const debug = this.o.debug ?? (() => {});
     const prompt =
       role === 'observer'
-        ? renderObserverPrompt(input, { sessionLabel: this.o.sessionLabel })
+        ? renderObserverPrompt(input, {
+            sessionLabel: this.o.sessionLabel,
+            priorityEnabled: this.o.priorityEnabled ?? true,
+          })
         : role === 'extractor'
           ? renderExtractorPrompt(input, { sessionLabel: this.o.sessionLabel })
-          : renderConsolidatorPrompt(input, {
-              session: (this.o.sessionLabel ?? '').slice(-32) || 'session',
-              journeyTargetTokens: this.o.journeyTargetTokens ?? 1000,
-            });
+          : role === 'reflect'
+            ? renderReflectPrompt(input, {
+                session: (this.o.sessionLabel ?? '').slice(-32) || 'session',
+                journeyTargetTokens: this.o.journeyTargetTokens ?? 1000,
+              })
+            : renderConsolidatorPrompt(input, {
+                session: (this.o.sessionLabel ?? '').slice(-32) || 'session',
+                journeyTargetTokens: this.o.journeyTargetTokens ?? 1000,
+              });
     const model =
-      role === 'observer' ? this.o.observerModel : (this.o.extractorModel ?? this.o.consolidatorModel);
-    const workerDir = role === 'consolidator' ? (input.pool?.sessionDir ?? this.o.cwd) : this.o.cwd;
+      role === 'observer' ? this.o.observerModel : role === 'reflect' ? (this.o.reflectModel ?? this.o.consolidatorModel) : (this.o.extractorModel ?? this.o.consolidatorModel);
+    const workerDir = role === 'consolidator' ? (input.pool?.sessionDir ?? this.o.cwd)
+      : role === 'reflect' ? (input.reflect?.sessionDir ?? this.o.cwd)
+      : this.o.cwd;
     const args = [
       '-p',
       '--mode', 'json',
@@ -187,6 +207,20 @@ export class PiSubprocessRunner implements ModelRunner {
             return;
           }
           finish({ runId: input.runId, ok: true, extraction: x.values, costUsd: costUsd > 0 ? costUsd : undefined });
+          return;
+        }
+        if (role === 'reflect') {
+          const rf = parseReflectionReport(body);
+          if (!rf.ok) {
+            finish({ runId: input.runId, ok: false, costUsd: costUsd > 0 ? costUsd : undefined, error: rf.error });
+            return;
+          }
+          finish({
+            runId: input.runId,
+            ok: true,
+            costUsd: costUsd > 0 ? costUsd : undefined,
+            reflection: { topics: rf.topics, journeyChanged: rf.journeyChanged },
+          });
           return;
         }
         const r = parseConsolidationReport(body);

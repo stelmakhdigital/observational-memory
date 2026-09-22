@@ -14,7 +14,7 @@ import type {
   WorkerInput,
   WorkerResult,
 } from '../../src/core/types.js';
-import { MockHistory, MockLedger, MockRunner } from '../fixtures/mocks.js';
+import { MockHistory, MockLedger, MockRunner, drafts } from '../fixtures/mocks.js';
 
 const baseConfig: OmConfig = resolveConfig({
   chunkTokens: 10,
@@ -32,10 +32,10 @@ function makeRunner() {
         runId: input.runId,
         ok: true,
         costUsd: 0.01,
-        observations: [
+        observations: drafts(
           `obs from ${input.chunk!.coversUpToId}`,
           `obs2 of chunk ${input.chunk!.coversUpToId}`,
-        ],
+        ),
       }),
     },
     {
@@ -260,7 +260,7 @@ describe('error handling (NFR-1)', () => {
   it('retries a failed observer once and succeeds without recording an error', async () => {
     const flaky = new MockRunner(
       {
-        result: (input: WorkerInput) => ({ runId: input.runId, ok: true, observations: ['ok note'] }),
+        result: (input: WorkerInput) => ({ runId: input.runId, ok: true, observations: drafts('ok note') }),
         failFirst: 1,
       },
       {
@@ -293,7 +293,7 @@ describe('error handling (NFR-1)', () => {
   it('records lastError when the retry is exhausted', async () => {
     const dead = new MockRunner(
       {
-        result: (input: WorkerInput) => ({ runId: input.runId, ok: true, observations: ['x'] }),
+        result: (input: WorkerInput) => ({ runId: input.runId, ok: true, observations: drafts('x') }),
         failFirst: 2, // both the attempt and its retry fail
       },
       {

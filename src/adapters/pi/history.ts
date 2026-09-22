@@ -14,8 +14,17 @@ import { estimateTokens } from '../../core/tokens.js';
 import type { HistorySource, Watermark } from '../../core/types.js';
 import type { PiContext, PiEntry, PiSessionManager } from './types.js';
 
-/** Extract a readable text from a pi message (AgentMessage-like). */
-export function messageText(message: PiEntry['message']): string {
+/**
+ * Extract a readable text from a pi message (AgentMessage-like).
+ * opts.attachments (v0.7): 'auto' (default) renders non-text parts as named
+ * placeholders; 'off' omits them. Unknown shapes degrade to a compact JSON
+ * placeholder so observations never crash the master.
+ */
+export function messageText(
+  message: PiEntry['message'],
+  opts: { attachments?: 'auto' | 'off' } = {},
+): string {
+  const attachments = opts.attachments ?? 'auto';
   if (!message || typeof message !== 'object') return '';
   const { role, content, toolName } = message as {
     role: string;
@@ -29,9 +38,18 @@ export function messageText(message: PiEntry['message']): string {
         .map((p) => {
           if (typeof p === 'string') return p;
           if (p && typeof p === 'object') {
-            const part = p as { type?: string; text?: string; name?: string };
+            const part = p as { type?: string; text?: string; name?: string; label?: string; filename?: string };
             if (part.type === 'text' && typeof part.text === 'string') return part.text;
-            if (part.type === 'image') return '[image]';
+            if (part.type === 'image') {
+              if (attachments === 'off') return '';
+              const nm = part.name ?? part.label ?? part.filename;
+              return nm ? `[image: ${nm}]` : '[image]';
+            }
+            if (part.type === 'file') {
+              if (attachments === 'off') return '';
+              const nm = part.name ?? part.label ?? part.filename;
+              return nm ? `[file: ${nm}]` : '[file]';
+            }
             if (part.type === 'toolCall' && part.name) return `[tool: ${part.name}]`;
           }
           return '';
@@ -50,10 +68,13 @@ export function messageText(message: PiEntry['message']): string {
 export interface PiHistoryOptions {
   chunkTokens: number;
   chunkOverlapTokens?: number;
+  /** v0.7: attachment observation mode (default 'auto'). */
+  attachments?: 'auto' | 'off';
 }
 
 export class PiHistorySource implements HistorySource {
   private readonly chunker: MessageChunker;
+  private readonly attachments: 'auto' | 'off';
 
   constructor(
     private readonly sessionManager: () => PiSessionManager,
@@ -64,6 +85,7 @@ export class PiHistorySource implements HistorySource {
       chunkTokens: opts.chunkTokens,
       overlapTokens: opts.chunkOverlapTokens ?? 0,
     });
+    this.attachments = opts.attachments ?? 'auto';
   }
 
   /** Current branch as OmMessage[] (ascending, entry ids preserved). */
@@ -72,7 +94,7 @@ export class PiHistorySource implements HistorySource {
     const out: OmMessage[] = [];
     for (const e of entries) {
       if (e.type !== 'message' || !e.message) continue;
-      const text = messageText(e.message);
+      const text = messageText(e.message, { attachments: this.attachments });
       if (!text) continue;
       out.push({ id: e.id, text, tokens: estimateTokens(text) });
     }

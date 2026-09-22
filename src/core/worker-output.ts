@@ -6,14 +6,27 @@
  * The orchestrator decides retry/failure policy (NFR-1).
  */
 
+import type { ObservationDraft, ObservationPriority } from './types.js';
+
 export interface ParsedObserverOutput {
   ok: boolean;
-  /** Observation texts, in emitted order. */
-  observations: string[];
+  /** Observation drafts, in emitted order (priority-tagged, v0.4). */
+  observations: ObservationDraft[];
   error?: string;
 }
 
+/** Map a P0/P1/P2 tag to a priority class; absent/malformed → routine. */
+export function priorityOfTag(tag: string | undefined): ObservationPriority {
+  switch ((tag ?? '').toUpperCase()) {
+    case 'P0': return 'critical';
+    case 'P1': return 'important';
+    case 'P2':
+    default: return 'routine';
+  }
+}
+
 const OBS_BLOCK = /OBSERVATIONS\s*\n([\s\S]*?)\n?\s*END_OBSERVATIONS/;
+const PRIORITY_TAG = /^\[\s*(P[012])\s*\]\s+(.*)$/i;
 
 export function parseObserverOutput(raw: string): ParsedObserverOutput {
   const text = raw.trim();
@@ -24,16 +37,22 @@ export function parseObserverOutput(raw: string): ParsedObserverOutput {
     return { ok: true, observations: [] };
   }
 
-  const bullets: string[] = [];
+  const bullets: ObservationDraft[] = [];
   for (const line of body.split(/\r?\n/)) {
     const b = /^\s*[-*]\s+(.*)$/.exec(line);
-    if (b && b[1]!.trim() && !/^END_OBSERVATIONS/.test(b[1]!)) bullets.push(b[1]!.trim());
+    if (!b || !b[1]!.trim() || /^END_OBSERVATIONS/.test(b[1]!)) continue;
+    const tagged = PRIORITY_TAG.exec(b[1]!);
+    if (tagged) {
+      bullets.push({ text: tagged[2]!.trim(), priority: priorityOfTag(tagged[1]) });
+    } else {
+      bullets.push({ text: b[1]!.trim(), priority: 'routine' });
+    }
   }
   if (bullets.length === 0) {
     // A bare paragraph without bullets: keep it if it's short enough to be a note.
     const para = body.replace(/OBSERVATIONS|END_OBSERVATIONS/g, '').trim();
     if (para && para.length <= 2000 && !/^(no observations|none)$/i.test(para)) {
-      return { ok: true, observations: [para] };
+      return { ok: true, observations: [{ text: para, priority: 'routine' }] };
     }
     return { ok: false, observations: [], error: 'no observations found in observer output' };
   }
@@ -121,4 +140,38 @@ export function parseExtractorOutput(raw: string): ParsedExtraction {
     }
   }
   return { ok: false, values: {}, error: 'no JSON object found in extractor output' };
+}
+
+export interface ParsedReflectionReport {
+  ok: boolean;
+  /** Topic file names touched (merged/renamed/updated). */
+  topics: string[];
+  journeyChanged: boolean;
+  error?: string;
+}
+
+const REFLECT_BLOCK = /REFLECTION_REPORT\s*\n([\s\S]*?)\n?\s*END_REFLECTION_REPORT/;
+
+/**
+ * Lenient parser for the reflector report (v0.6). The reflector only
+ * REORGANIZES durable files (no observation ids), so the report carries no
+ * consumed/dropped lists.
+ */
+export function parseReflectionReport(raw: string): ParsedReflectionReport {
+  const text = raw.trim();
+  const m = REFLECT_BLOCK.exec(text);
+  if (!m) {
+    return { ok: false, topics: [], journeyChanged: false, error: 'reflection report block not found' };
+  }
+  const body = m[1]!;
+  const field = (name: string): string | undefined => {
+    const fm = new RegExp(`^${name}:\\s*(.*)$`, 'mi').exec(body);
+    return fm?.[1];
+  };
+  const journey = field('journey_changed')?.trim().toLowerCase();
+  return {
+    ok: true,
+    topics: csv(field('topics')),
+    journeyChanged: journey === 'true',
+  };
 }

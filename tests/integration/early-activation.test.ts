@@ -6,7 +6,7 @@ import { OmOrchestrator } from '../../src/core/orchestrator.js';
 import { resolveConfig, type OmConfig } from '../../src/core/config.js';
 import { MemoryStore } from '../../src/core/memory-store.js';
 import type { EventSink, WorkerInput } from '../../src/core/types.js';
-import { MockHistory, MockLedger, MockRunner } from '../fixtures/mocks.js';
+import { MockHistory, MockLedger, MockRunner, drafts } from '../fixtures/mocks.js';
 
 // chunkTokens 1000; early min 30; consolidation/compaction far away.
 const baseConfig: OmConfig = resolveConfig({
@@ -24,7 +24,7 @@ function makeRunner() {
       result: (input: WorkerInput) => ({
         runId: input.runId,
         ok: true,
-        observations: [`early obs from ${input.chunk!.coversUpToId}`],
+        observations: drafts(`early obs from ${input.chunk!.coversUpToId}`),
       }),
     },
     {

@@ -7,6 +7,7 @@ import type {
   HistorySource,
   LedgerStore,
   ModelRunner,
+  ObservationDraft,
   Role,
   TypedLedgerEntry,
   LedgerEntryType,
@@ -15,6 +16,13 @@ import type {
 } from '../../src/core/types.js';
 
 export const identityEstimate = (t: string) => t.length;
+
+/** Helper: observation drafts from plain texts (all 'routine', v0.4+). */
+export const drafts = (...texts: string[]): ObservationDraft[] =>
+  texts.map((text) => ({ text, priority: 'routine' as const }));
+
+/** Helper: observation drafts with explicit priorities. */
+export const draft = (text: string, priority: ObservationDraft['priority']): ObservationDraft => ({ text, priority });
 
 export class MockHistory implements HistorySource {
   messages: OmMessage[] = [];
@@ -120,13 +128,17 @@ export class MockRunner implements ModelRunner {
   failures = 0;
   private failCounters = new Map<string, number>();
 
-  constructor(private observer: ScriptedRun, private consolidator: ScriptedRun, private extractor?: ScriptedRun) {}
+  constructor(private observer: ScriptedRun, private consolidator: ScriptedRun, private extractor?: ScriptedRun, private reflect?: ScriptedRun) {}
 
   async run(role: Role, input: WorkerInput): Promise<WorkerResult> {
     this.calls.push({ role, input });
     const defaultExtraction: ScriptedRun = { result: (i) => ({ runId: i.runId, ok: true, extraction: {} }) };
+    const defaultReflect: ScriptedRun = { result: (i) => ({ runId: i.runId, ok: true, reflection: { topics: [], journeyChanged: false } }) };
     const run =
-      role === 'observer' ? this.observer : role === 'extractor' ? (this.extractor ?? defaultExtraction) : this.consolidator;
+      role === 'observer' ? this.observer
+      : role === 'extractor' ? (this.extractor ?? defaultExtraction)
+      : role === 'reflect' ? (this.reflect ?? defaultReflect)
+      : this.consolidator;
     this.inFlight++;
     try {
       await sleep(run.delayMs ?? 1);

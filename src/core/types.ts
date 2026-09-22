@@ -3,7 +3,16 @@
  * See docs/ARCHITECTURE.md §2-3.
  */
 
-export type Role = 'observer' | 'consolidator' | 'extractor';
+export type Role = 'observer' | 'consolidator' | 'extractor' | 'reflect';
+
+/**
+ * Observation priority classes (v0.4, niche-standard 🔴🟡🟢):
+ *  - critical: breaks work if forgotten (decisions, security, current-task-critical facts);
+ *  - important: decisions made, work completed, problems hit;
+ *  - routine: everything else (default).
+ * Priority drives block rendering and budget trimming (compaction.inject: topK).
+ */
+export type ObservationPriority = 'critical' | 'important' | 'routine';
 
 /**
  * A declarative extractor (Mastra-style): a named structured value pulled out
@@ -16,6 +25,18 @@ export interface ExtractorSpec {
   name: string;
   /** What to extract and how it evolves (fed into the prompt). */
   description: string;
+  /**
+   * Show the previously stored value to the extractor (v0.4, Mastra-style
+   * includePreviousExtraction): incremental merge instead of re-extraction.
+   * Default: true. Set false for volatile values that must be re-derived.
+   */
+  includePrevious?: boolean;
+}
+
+/** Draft observation from a worker: content + priority (ids derived at commit). */
+export interface ObservationDraft {
+  text: string;
+  priority: ObservationPriority;
 }
 
 /** Atomic, self-contained note about what happened in a slice of history. */
@@ -30,6 +51,15 @@ export interface Observation {
   tokenCount: number;
   /** ISO timestamp of the originating event. */
   createdAt: string;
+  /** Priority class (v0.4); absent in older ledgers → treated as 'routine'. */
+  priority?: ObservationPriority;
+  /** Anti-poisoning flag (v0.6): content looks like an injected instruction. */
+  quarantined?: boolean;
+  /**
+   * Provenance (v0.5): the raw-history message range this observation was
+   * distilled from (recall can point the agent back to the source).
+   */
+  sourceRange?: { fromId: string; toId: string };
 }
 
 export type LedgerEntryType =
@@ -123,6 +153,8 @@ export interface CompactionBlock {
   memoryMap: string;
   /** JOURNEY.md verbatim. */
   journey: string;
+  /** Built-in current-task value rendered at the head of the block (v0.4). */
+  currentTask: string;
   /** Fresh verbatim history, snapped to a chunk boundary. */
   verbatimTail: string;
   /** Gap markers rendered at the head, if any. */
@@ -141,12 +173,16 @@ export interface WorkerInput {
     text: string;
     overlapContext: string;
     coversUpToId: string;
+    /** Provenance (v0.5): id of the FIRST message in the slice. */
+    fromId?: string;
   };
   /** Consolidator: oldest observations to fold into durable topic files. */
   pool?: {
     observations: Observation[];
     sessionDir: string;
     journey: string;
+    /** Rendered memory-map line for shared (project-level) topics (v0.7). */
+    sharedTopics?: string;
   };
   /** Extractor: refresh structured values from the active observation pool. */
   extract?: {
@@ -156,6 +192,18 @@ export interface WorkerInput {
     /** Active observations to extract from. */
     observations: Observation[];
     sessionDir: string;
+  };
+  /**
+   * Reflector (v0.6, sleep-time): reorganize durable memory files (topics /
+   * INDEX / JOURNEY) without consuming observations.
+   */
+  reflect?: {
+    sessionDir: string;
+    /** Durable topic file names. */
+    topics: string[];
+    journey: string;
+    /** Rendered memory-map line for shared (project-level) topics, if any. */
+    sharedTopics?: string;
   };
 }
 
@@ -171,13 +219,15 @@ export interface WorkerResult {
   runId: string;
   ok: boolean;
   error?: string;
-  /** Observer output: observation CONTENTS (ids/tokenCount are derived by the
+  /** Observer output: observation drafts (ids/tokenCount are derived by the
    * orchestrator at commit time — see ids.ts, FR-1.4). */
-  observations?: string[];
+  observations?: ObservationDraft[];
   /** Consolidator output. */
   consolidation?: ConsolidationResult;
   /** Extractor output: values keyed by extractor spec id. */
   extraction?: Record<string, unknown>;
+  /** Reflector output (v0.6): durable files touched. */
+  reflection?: { topics: string[]; journeyChanged: boolean };
   costUsd?: number;
 }
 
@@ -206,6 +256,8 @@ export interface HistorySource {
     text: string;
     overlapContext: string;
     coversUpToId: string;
+    /** Provenance (v0.5): id of the first message in the slice. */
+    fromId: string;
     tokens: number;
   } | null;
   /** Estimated total context tokens (for the compact trigger). */
@@ -300,9 +352,15 @@ export interface TopicSummary {
 export interface MemoryRoot {
   sessionDir(sessionId: string): string;
   exists(sessionId: string): boolean;
-  /** One-time seed from a parent session (fork/clone); true when actually seeded. */
-  seedFrom(parentSessionId: string, sessionId: string): boolean;
+  /**
+   * One-time seed from a parent session (fork/clone); true when actually
+   * seeded. opts.force (v0.7) allows manual re-seeding (still never clobbers
+   * existing child files).
+   */
+  seedFrom(parentSessionId: string, sessionId: string, opts?: { force?: boolean }): boolean;
   listTopics(sessionId: string): TopicSummary[];
+  /** Durable topic file content (v0.5, for recall). '' when missing. */
+  readTopic(sessionId: string, file: string): string;
   readJourney(sessionId: string): string;
   /** Orchestrator-owned INDEX.md re-render from topic front-matter. */
   renderIndex(sessionId: string): void;
@@ -310,6 +368,11 @@ export interface MemoryRoot {
   loadExtracted(sessionId: string, id: string): unknown;
   saveExtracted(sessionId: string, id: string, value: unknown): void;
   listExtracted(sessionId: string): string[];
+  /** Shared (project-level) topic root, or null when disabled (v0.7). */
+  sharedDir(): string | null;
+  listSharedTopics(): TopicSummary[];
+  /** Shared topic file content (v0.7). '' when missing. */
+  readSharedTopic(file: string): string;
 }
 
 export interface Clock {

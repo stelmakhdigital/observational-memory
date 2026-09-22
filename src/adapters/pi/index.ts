@@ -14,6 +14,7 @@
  * - workers: headless `pi -p --mode json` subprocesses (PiSubprocessRunner).
  */
 import path from 'node:path';
+import { Type } from 'typebox';
 import {
   MemoryStore,
   OmOrchestrator,
@@ -97,12 +98,18 @@ export default function observationalMemory(pi: PiApi): OmExtension {
     const config = loadPiAdapterConfig(ctx.cwd);
     const header = ctx.sessionManager.getHeader();
     const sessionId = ctx.sessionManager.getSessionId() || header.id;
-    const memory = new MemoryStore(config.memoryDir);
+    const memory = new MemoryStore(config.memoryDir, {
+      sharedDir: config.om.shared.enabled ? path.join(config.memoryDir, 'shared') : null,
+    });
 
     const history = new PiHistorySource(
       () => ctx.sessionManager,
       () => ctx,
-      { chunkTokens: config.om.chunkTokens, chunkOverlapTokens: config.om.chunkOverlapTokens },
+      {
+        chunkTokens: config.om.chunkTokens,
+        chunkOverlapTokens: config.om.chunkOverlapTokens,
+        attachments: config.attachments,
+      },
     );
     const ledger = new PiLedgerStore(
       (data) => pi.appendEntry(OM_CUSTOM_TYPE, data),
@@ -114,8 +121,10 @@ export default function observationalMemory(pi: PiApi): OmExtension {
       observerModel: config.om.models.observer,
       consolidatorModel: config.om.models.consolidator,
       extractorModel: config.om.models.extractor,
+      reflectModel: config.om.models.reflect,
       sessionLabel: path.basename(ctx.cwd),
       journeyTargetTokens: config.om.journeyTargetTokens,
+      priorityEnabled: config.om.priority.enabled,
       timeoutMs: config.workerTimeoutMs,
       debug,
     });
@@ -198,6 +207,39 @@ export default function observationalMemory(pi: PiApi): OmExtension {
     else console.log(out);
   };
 
+  // v0.5: the agent itself can query memory mid-conversation (deterministic,
+  // no LLM). Registered at boot; the gate is checked at call time.
+  pi.registerTool({
+    name: 'om_recall',
+    label: 'OM Recall',
+    description:
+      'Search this session’s observational memory (observations, durable topics, journey, extracted values). '
+      + 'Use when you need a fact, decision or earlier detail that is no longer in the visible context. '
+      + 'Deterministic BM25-lite search — no LLM. Optional since/until (ISO dates) filter observations by time.',
+    promptSnippet: 'Search the session’s observational memory (facts, decisions, history)',
+    promptGuidelines: [
+      'Use om_recall before re-asking the user for context that may already be in memory.',
+    ],
+    parameters: Type.Object({
+      query: Type.String({ description: 'What to look for' }),
+      limit: Type.Optional(Type.Number({ description: 'Max hits (default 10)' })),
+      since: Type.Optional(Type.String({ description: 'Only observations created on/after (ISO date)' })),
+      until: Type.Optional(Type.String({ description: 'Only observations created on/before (ISO date)' })),
+    }),
+    async execute(_toolCallId: string, params: { query: string; limit?: number; since?: string; until?: string }, _signal: unknown, _onUpdate: unknown, ctx: PiContext) {
+      const r = track(ctx);
+      if (!r.orch.isEnabled()) {
+        return { content: [{ type: 'text', text: 'Observational memory is off (enable with /om on).' }], details: {} };
+      }
+      const text = r.orch.recallText(params.query, {
+        limit: params.limit,
+        since: params.since,
+        until: params.until,
+      });
+      return { content: [{ type: 'text', text }], details: {} };
+    },
+  });
+
   pi.registerCommand('om', {
     description: 'Toggle observational memory for this session (on/off)',
     handler: async (args, ctx) => {
@@ -256,7 +298,7 @@ export default function observationalMemory(pi: PiApi): OmExtension {
   });
 
   pi.registerCommand('om:extract', {
-    description: 'Force a structured-extractor refresh now (profile, …)',
+    description: 'Force a structured-extractor refresh now (profile, current task, …)',
     handler: async (_args, ctx) => {
       const r = track(ctx);
       if (!r.orch.isEnabled()) {
@@ -265,6 +307,62 @@ export default function observationalMemory(pi: PiApi): OmExtension {
       }
       r.orch.forceExtract();
       report(ctx, ['Extraction started (background). Check /om:status.']);
+    },
+  });
+
+  pi.registerCommand('om:recall', {
+    description: 'Search this session’s observational memory: /om:recall <query> [limit N] [since DATE] [until DATE]',
+    handler: async (args, ctx) => {
+      const r = track(ctx);
+      if (!r.orch.isEnabled()) {
+        report(ctx, ['OM is off — enable with /om on first.']);
+        return;
+      }
+      const tokens = args.trim().split(/\s+/).filter(Boolean);
+      let limit: number | undefined;
+      let since: string | undefined;
+      let until: string | undefined;
+      const rest: string[] = [];
+      for (let i = 0; i < tokens.length; i++) {
+        const t = tokens[i]!;
+        if (t.toLowerCase() === 'limit') limit = Number(tokens[++i]);
+        else if (t.toLowerCase() === 'since') since = tokens[++i];
+        else if (t.toLowerCase() === 'until') until = tokens[++i];
+        else rest.push(t);
+      }
+      const query = rest.join(' ');
+      if (!query) {
+        report(ctx, ['Usage: /om:recall <query> [limit N] [since DATE] [until DATE]']);
+        return;
+      }
+      report(ctx, [r.orch.recallText(query, { limit, since, until })]);
+    },
+  });
+
+  pi.registerCommand('om:reflect', {
+    description: 'Force a sleep-time memory reorganization pass now (topics/INDEX/JOURNEY)',
+    handler: async (_args, ctx) => {
+      const r = track(ctx);
+      if (!r.orch.isEnabled()) {
+        report(ctx, ['OM is off — enable with /om on first.']);
+        return;
+      }
+      r.orch.forceReflect();
+      report(ctx, ['Reflect pass started (background). Check /om:status.']);
+    },
+  });
+
+  pi.registerCommand('om:seed-from', {
+    description: 'Seed this session’s memory from another session: /om:seed-from <sessionId>',
+    handler: async (args, ctx) => {
+      const r = track(ctx);
+      const parent = args.trim();
+      if (!parent) {
+        report(ctx, ['Usage: /om:seed-from <sessionId>']);
+        return;
+      }
+      const did = r.memory.seedFrom(parent, ctx.sessionManager.getSessionId(), { force: true });
+      report(ctx, [did ? `Memory seeded from ${parent}.` : `No memory found for ${parent} (or nothing to copy).`]);
     },
   });
 

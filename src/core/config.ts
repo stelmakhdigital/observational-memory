@@ -30,6 +30,40 @@ export interface EarlyActivationConfig {
   minUnobservedTokens: number;
 }
 
+/** Observation priority tagging (v0.4). */
+export interface PriorityConfig {
+  enabled: boolean;
+}
+
+/**
+ * Compaction injection mode (v0.5):
+ *  - full: render the whole pre-tail pool (default, cache-friendly);
+ *  - topK: deterministic budget trim — critical first, then important,
+ *    then routine (newest first within a class), up to topKBudgetTokens.
+ */
+export interface CompactionConfig {
+  inject: 'full' | 'topK';
+  topKBudgetTokens: number;
+}
+
+/**
+ * Reflector (v0.6, sleep-time / Letta-style): a rare background worker that
+ * reorganizes durable memory (topic merge/rename, INDEX, JOURNEY compression)
+ * while the session is idle. Strictly rate-limited by cost and interval.
+ */
+export interface ReflectorConfig {
+  enabled: boolean;
+  /** Milliseconds of idle before a reflect pass is attempted. */
+  idleMs: number;
+  /** Minimum time between two reflect passes. */
+  minIntervalMs: number;
+}
+
+/** Shared project-level memory (v0.7): <root>/shared topics, read-only. */
+export interface SharedMemoryConfig {
+  enabled: boolean;
+}
+
 export interface OmConfig {
   /** New-history tokens per observer chunk (FR-1.1). */
   chunkTokens: number;
@@ -51,6 +85,8 @@ export interface OmConfig {
     consolidator: ModelRef;
     /** Optional; defaults to the consolidator model. */
     extractor?: ModelRef;
+    /** Optional; defaults to the consolidator model (v0.6). */
+    reflect?: ModelRef;
   };
   /** Structured extractors (Mastra-style, v2). Empty list disables extraction. */
   extractors: ExtractorSpec[];
@@ -59,6 +95,14 @@ export interface OmConfig {
   debugLog: boolean;
   gapMarkers: GapMarkersConfig;
   earlyActivation: EarlyActivationConfig;
+  /** Priority tagging of observations (v0.4). */
+  priority: PriorityConfig;
+  /** Compaction injection mode (v0.5). */
+  compaction: CompactionConfig;
+  /** Sleep-time reflector (v0.6). */
+  reflector: ReflectorConfig;
+  /** Shared project-level memory (v0.7). */
+  shared: SharedMemoryConfig;
 }
 
 export const DEFAULT_CONFIG: OmConfig = {
@@ -78,6 +122,10 @@ export const DEFAULT_CONFIG: OmConfig = {
   debugLog: false,
   gapMarkers: { enabled: true, thresholdMs: 10 * 60 * 1000 },
   earlyActivation: { enabled: true, idleMs: 5 * 60 * 1000, minUnobservedTokens: 300 },
+  priority: { enabled: true },
+  compaction: { inject: 'full', topKBudgetTokens: 20000 },
+  reflector: { enabled: true, idleMs: 30 * 60 * 1000, minIntervalMs: 6 * 60 * 60 * 1000 },
+  shared: { enabled: true },
   extractors: [
     {
       id: 'profile',
@@ -85,6 +133,15 @@ export const DEFAULT_CONFIG: OmConfig = {
       description:
         'Stable facts about the user and their preferences that persist across sessions: '
         + 'communication language, coding style, stack, recurring workflows, do/don’t rules.',
+    },
+    {
+      id: 'current-task',
+      name: 'Current task & next steps',
+      description:
+        'The CURRENT state of the work: the active task or goal, what was done to reach it, '
+        + 'what is pending or blocked, and the immediate next step. Rendered at the head of the '
+        + 'compaction block so the agent never loses the thread after compaction. Keep it short: '
+        + 'an object with fields task (string), pending (string[]), nextStep (string), asOf (YYYY-MM-DD).',
     },
   ],
 };
@@ -127,6 +184,11 @@ export function validateConfig(c: OmConfig): void {
   if (c.earlyActivation.idleMs <= 0) problems.push('earlyActivation.idleMs must be > 0');
   if (c.earlyActivation.minUnobservedTokens <= 0)
     problems.push('earlyActivation.minUnobservedTokens must be > 0');
+  if (c.compaction.inject !== 'full' && c.compaction.inject !== 'topK')
+    problems.push("compaction.inject must be 'full' or 'topK'");
+  if (!(c.compaction.topKBudgetTokens > 0)) problems.push('compaction.topKBudgetTokens must be > 0');
+  if (!(c.reflector.idleMs > 0)) problems.push('reflector.idleMs must be > 0');
+  if (!(c.reflector.minIntervalMs > 0)) problems.push('reflector.minIntervalMs must be > 0');
   if (!Array.isArray(c.extractors)) problems.push('extractors must be an array');
   else {
     const ids = new Set<string>();

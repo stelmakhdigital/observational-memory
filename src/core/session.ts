@@ -13,6 +13,7 @@ import { FileLedgerStore, defaultLedgerFile } from './ledger/file-store.js';
 import { MemoryStore } from './memory-store.js';
 import { OmOrchestrator } from './orchestrator.js';
 import type { EventSink, HistorySource, ModelRunner } from './types.js';
+import path from 'node:path';
 
 export interface OmSessionOptions {
   /** Root directory for durable memory + the ledger file (<root>/<sessionId>/). */
@@ -48,7 +49,9 @@ const noop = () => {};
  */
 export function createOmSession(opts: OmSessionOptions): OmSession {
   const config = resolveConfig(opts.config);
-  const memory = new MemoryStore(opts.root);
+  // Shared project-level memory (v0.7): <root>/shared, read-only for sessions.
+  const sharedDir = config.shared.enabled ? path.join(opts.root, 'shared') : null;
+  const memory = new MemoryStore(opts.root, { sharedDir });
   const ledger = new FileLedgerStore({
     file: opts.ledgerFile ?? defaultLedgerFile(opts.root, opts.sessionId),
     onCorrupt: (line, err) => opts.log?.(`ledger line ${line}: ${err}`),
