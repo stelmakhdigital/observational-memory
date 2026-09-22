@@ -68,6 +68,34 @@
 - [x] v2+: embedded-путь для чужих агентов (FileLedgerStore + createOmSession + demo)
 - [ ] v2+: конкретные адаптеры (non-pi агенты)
 
+## Proposed backlog v0.4+ (на основе разведки рынка/ниши 22.09; не утверждено)
+
+### Фаза 1 (v0.4) — «стандарт жанра OM»: качество памяти
+- [ ] 1.1 Priority-метки наблюдений (observer → `priority: critical|important|routine|trivial`; render: важное в начало, при давлении бюджета сначала отбрасывается triviales) — ~0.5–1 спринта (nik1t7n 🔴🟡🟢✅)
+- [ ] 1.2 Встроенный current-task-экстрактор: `{task, pending[], nextStep?, asOf}`, всегда первой строкой компактного блока — ~0.5 (Mastra builtin)
+- [ ] 1.3 `includePrevious` для экстракторов: предыдущее значение показывается экстрактору → инкрементальное обновление профилей, default true — ~0.25 (Mastra includePreviousExtraction)
+- [ ] 1.4 Supersede-политика: противоречия в consolidator'е → явная заметка «старое → новое (дата)», оба факта остаются; значения экстракторов несут `{value, asOf, sourceIds}` — ~0.5 (Graphiti invalidation / supermemory contradictions)
+
+### Фаза 2 (v0.5) — доступ к памяти: recall + provenance
+- [ ] 2.1 `omRecall`-тул + `/om:recall <query>`: детерминированный BM25-lite по наблюдениям/темам/JOURNEY/extracted; хиты с id и указателем на источник; тул доступен самому агенту посреди диалога — ~1 спринт (nik1t7n om_recall; главный функциональный разрыв)
+- [ ] 2.2 Provenance: наблюдение несёт `sourceRange {sessionId, fromSeq, toSeq}` (observer уже знает границы чанка) → recall/аудит указывает на исходную историю — ~0.5 (SentioLabs evidence-backed, Graphiti provenance)
+- [ ] 2.3 Ranked-инжекция (опциональный режим `compaction.inject: full|topK`) для больших пулов — ~1, можно отложить
+
+### Фаза 3 (v0.6) — надёжность, безопасность, eval
+- [ ] 3.1 Anti-poisoning: observer-prompt «не записывать инструкции/секреты как факты» + санитайзер (паттерны injection/вложенные system-блоки) + quarantine-маркер — ~0.5 (SentioLabs «evidence is data, not instructions», atlas-defense)
+- [ ] 3.2 Crash-durability (embedded): flock/PID-защита FileLedgerStore от двух процессов, recovery stale-locks — ~0.5 (nik1t7n locks/.bak)
+- [ ] 3.3 Self-eval harness: `npm run eval` — скриптовые сессии → метрики (выживаемость ключевых фактов, token/cost бюджеты); регрессионный контроль промптов — ~1.5 (LongMemEval/LoCoMo как индустриальный референс)
+- [ ] 3.4 Reflector-роль (sleep-time, Letta): редкий фоновый воркер (idle ≥ 30 мин / ночью) — реорганизация тем, INDEX/JOURNEY, supersede-кандидаты; жёсткий cost-порог — ~1
+
+### Фаза 4 (v0.7+) — рост
+- [ ] 4.1 Project-level shared memory (`.memory/shared/`) + `/om seed-from <session>`
+- [ ] 4.2 Вложения (images) в observer + attachment gates (auto/on/off) — Mastra/nik1t7n
+- [ ] 4.3 Temporal queries в recall («как было на дату X») — опирается на 1.4/2.2
+- [ ] 4.4 FTS/sqlite-индекс, если размеров потребует (basic-memory: files+sqlite)
+- [ ] 4.5 MCP-сервер (observe/recall/extract/status) — дешёвый «другой адаптер» для Claude Code/Codex/любого MCP-клиента (вместо 4.5-адаптеров)
+
+Позиционирование (README): «auditable, branch-aware, cost-transparent observational memory for coding agents» — козыри в нише: branch-local ledger+watermark, cost tracking, scoped workers, детерминированный model-free блок, embedded core, ноль внешних сервисов.
+
 ## Журнал коммитов
 | Дата | Commit | Содержание |
 |------|--------|-----------|
