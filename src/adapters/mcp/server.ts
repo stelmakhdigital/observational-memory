@@ -5,9 +5,24 @@
  *
  * Run:   npm run build && OM_MCP_ROOT=<memory root> OM_MCP_SESSION=<sessionId> npm run mcp
  * Env:
- *   OM_MCP_ROOT     — memory root dir (the one from createOmSession / pi .memory)
- *   OM_MCP_SESSION  — session id (sanitized the same way as MemoryStore)
- *   OM_MCP_SHARED   — optional shared topics dir (default: <root>/shared)
+ *   OM_MCP_ROOT              — memory root dir (the one from createOmSession / pi .memory)
+ *   OM_MCP_SESSION           — session id (sanitized the same way as MemoryStore)
+ *   OM_MCP_SHARED            — optional shared topics dir (default: <root>/shared)
+ *   OM_MCP_PI_SESSION        — optional EXACT path to a pi session JSONL to read the
+ *                              ledger from (pi stores om.* as custom entries in the
+ *                              session file, not in <root>/<sessionId>/ledger.jsonl)
+ *   OM_MCP_PI_SESSIONS_DIR   — optional sessions dir for auto-scan (default
+ *                              ~/.pi/agent/sessions): the most recent .jsonl (≤50 newest
+ *                              files by mtime) containing om.* entries is used as the
+ *                              ledger source
+ *
+ * Ledger source (om_status/om_recall), first match wins:
+ *   1. OM_MCP_PI_SESSION (if the file has valid om.* entries)
+ *   2. auto-scanned pi session (OM_MCP_PI_SESSIONS_DIR)
+ *   3. embedded <root>/<sessionId>/ledger.jsonl (FileLedgerStore)
+ * Pi-session mode is READ-ONLY and covers one session file (a linear history —
+ * pi branch semantics under /tree are NOT reconstructed: known limitation).
+ * om_topics always reads the shared topic files in the memory root.
  *
  * Tools (all deterministic, no LLM):
  *   om_status — pool/tokens/topics/cost snapshot
@@ -20,6 +35,7 @@
  */
 import { createInterface } from 'node:readline';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildSessionRecallDocs, recallSearch, renderRecallHits } from '../../core/recall.js';
@@ -28,6 +44,8 @@ import { MemoryStore } from '../../core/memory-store.js';
 import { foldPool } from '../../core/ledger/pool.js';
 import { sumCosts } from '../../core/cost.js';
 import { estimateTokens } from '../../core/tokens.js';
+import type { LedgerStore } from '../../core/types.js';
+import { readPiLedger, scanForPiSession } from './pi-ledger.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 const SERVER_NAME = 'observational-memory-mcp';
@@ -80,7 +98,10 @@ function envSession(): string {
 }
 
 interface McpState {
-  ledger: FileLedgerStore;
+  ledger: LedgerStore;
+  /** Where om_status/om_recall read the ledger from (user-visible in om_status). */
+  ledgerSource: 'embedded' | 'pi-session';
+  ledgerFile: string;
   memory: MemoryStore;
   sessionId: string;
 }
@@ -93,12 +114,43 @@ function initState(): McpState {
     : existsSync(path.join(root, 'shared'))
       ? path.join(root, 'shared')
       : null;
-  return {
-    ledger: new FileLedgerStore({
-      file: defaultLedgerFile(root, sessionId),
+  // M5: the pi adapter keeps the ledger as custom 'om' entries inside the pi
+  // session JSONL — prefer that (read-only) over the embedded ledger file.
+  const candidates: string[] = [];
+  const explicit = process.env.OM_MCP_PI_SESSION;
+  if (explicit) {
+    candidates.push(path.resolve(explicit));
+  } else {
+    const sessionsDir = process.env.OM_MCP_PI_SESSIONS_DIR
+      ? path.resolve(process.env.OM_MCP_PI_SESSIONS_DIR)
+      : path.join(os.homedir(), '.pi', 'agent', 'sessions');
+    const scanned = scanForPiSession(sessionsDir);
+    if (scanned) candidates.push(scanned);
+  }
+  const embeddedFile = defaultLedgerFile(root, sessionId);
+  let ledger: LedgerStore | null = null;
+  let ledgerSource: 'embedded' | 'pi-session' = 'embedded';
+  let ledgerFile = embeddedFile;
+  for (const c of candidates) {
+    const res = readPiLedger(c);
+    if (res) {
+      ledger = res.store;
+      ledgerSource = 'pi-session';
+      ledgerFile = c;
+      break;
+    }
+  }
+  if (!ledger) {
+    ledger = new FileLedgerStore({
+      file: embeddedFile,
       lock: false, // read-only consumer: never block or write locks
       onAppendError: () => {},
-    }),
+    });
+  }
+  return {
+    ledger,
+    ledgerSource,
+    ledgerFile,
     memory: new MemoryStore(root, { sharedDir }),
     sessionId,
   };
@@ -116,6 +168,7 @@ function toolStatus(s: McpState): ToolResult {
   const journey = s.memory.readJourney(s.sessionId);
   const text = [
     `session: ${s.sessionId}`,
+    `source: ${s.ledgerSource} — ${s.ledgerFile}`,
     `active observations: ${active.length} (~${activeTokens} tokens)`,
     `consolidated observations: ${obsAll.length - active.length}`,
     `topics: ${topics.map((t) => t.topic).join(', ') || '(none)'}`,

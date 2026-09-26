@@ -149,6 +149,29 @@ describe('prompts', () => {
     expect(p).toContain('journey_changed');
   });
 
+  it('consolidator JOURNEY prompt forbids "end of session" framing (append-mostly, MIT-inspired)', () => {
+    const p = rc2(
+      {
+        runId: 'r3',
+        role: 'consolidator',
+        pool: {
+          observations: [{ id: 'om-1', coversUpToId: 'm1', content: 'n', tokenCount: 1, createdAt: 'x' }],
+          sessionDir: '/tmp/s1',
+          journey: '',
+        },
+      },
+      { session: 's1', journeyTargetTokens: 100 },
+    );
+    // (a) append-mostly dated segments
+    expect(p).toContain('APPEND a short dated segment (## <date>');
+    // (b) the batch is not the session end; "end of session" phrasing is forbidden
+    expect(p).toContain('NOT THE END OF THE SESSION');
+    expect(p).toContain('at the end of the session');
+    expect(p).toContain('the session concluded');
+    // (c) oldest-segment compression past journeyTargetTokens
+    expect(p).toContain('compress the OLDEST segments');
+  });
+
   it('consolidator prompt throws without pool', () => {
     expect(() => rc2({ runId: 'r2', role: 'consolidator' }, { session: 's', journeyTargetTokens: 1 })).toThrow();
   });

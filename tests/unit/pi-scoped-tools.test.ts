@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createScopedFileTools, resolveContained } from '../../src/adapters/pi/scoped-tools.js';
@@ -26,6 +26,69 @@ describe('resolveContained', () => {
     expect(() => resolveContained(dir, '../../etc/passwd')).toThrow(/escapes/);
     expect(() => resolveContained(dir, '/etc/passwd')).toThrow(/escapes/);
     expect(() => resolveContained(dir, 'a/../../x')).toThrow(/escapes/);
+  });
+});
+
+describe('n4: symlink containment', () => {
+  let outside: string;
+  beforeEach(() => {
+    outside = mkdtempSync(path.join(tmpdir(), 'om-outside-'));
+  });
+  afterEach(() => rmSync(outside, { recursive: true, force: true }));
+
+  it('resolveContained rejects a path that escapes via a symlink inside the dir', () => {
+    symlinkSync(outside, path.join(dir, 'link'));
+    expect(() => resolveContained(dir, 'link/secret.md')).toThrow(/escapes/);
+    // ordinary nested paths still work and keep their lexical form
+    expect(resolveContained(dir, 'a/b.md')).toBe(path.join(dir, 'a', 'b.md'));
+  });
+
+  it('read/write/ls/grep reject a symlinked target outside the dir', async () => {
+    writeFileSync(path.join(outside, 'secret.md'), 'top secret');
+    symlinkSync(outside, path.join(dir, 'link'));
+    const rd = await call('read', { path: 'link/secret.md' });
+    expect(rd.isError).toBe(true);
+    expect(rd.text).toContain('escapes');
+    const wr = await call('write', { path: 'link/evil.md', content: 'x' });
+    expect(wr.isError).toBe(true);
+    expect(wr.text).toContain('escapes');
+    // nothing was written outside the dir
+    try {
+      readFileSync(path.join(outside, 'evil.md'), 'utf8');
+      throw new Error('write leaked outside');
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    }
+    const ls = await call('ls', { path: 'link' });
+    expect(ls.isError).toBe(true);
+    const gr = await call('grep', { pattern: 'secret', path: 'link' });
+    expect(gr.isError).toBe(true);
+  });
+
+  it('ls/grep walks do not follow a symlinked dir outside', async () => {
+    writeFileSync(path.join(outside, 'leak.md'), 'leak');
+    symlinkSync(outside, path.join(dir, 'link'));
+    writeFileSync(path.join(dir, 'ok.md'), 'ok');
+    const ls = await call('ls', {});
+    expect(ls.text).toContain('ok.md');
+    expect(ls.text).not.toContain('leak.md');
+    const gr = await call('grep', { pattern: 'leak' });
+    expect(gr.isError).toBeFalsy();
+    expect(gr.text).toBe('(no matches)');
+  });
+
+  it('write to a non-existing nested path inside the dir still works', async () => {
+    const w = await call('write', { path: 'new/deep/topic.md', content: 'x' });
+    expect(w.isError).toBeFalsy();
+    expect(readFileSync(path.join(dir, 'new', 'deep', 'topic.md'), 'utf8')).toBe('x');
+  });
+
+  it('write through a symlinked PARENT that is outside is rejected', async () => {
+    // link itself is inside lexically; its REAL location is outside
+    symlinkSync(outside, path.join(dir, 'link'));
+    const w = await call('write', { path: 'link/nested/file.md', content: 'x' });
+    expect(w.isError).toBe(true);
+    expect(w.text).toContain('escapes');
   });
 });
 

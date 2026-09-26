@@ -51,14 +51,17 @@ function modelFlag(ref: ModelRef): string {
 }
 
 interface JsonlOutcome {
+  /** n10: ALL non-empty assistant texts from message_end events, in order. */
+  texts: string[];
+  /** The last non-empty assistant text ('' when none). */
   text: string;
   costUsd: number;
   error?: string;
 }
 
-/** Parse a pi JSONL event stream into (final assistant text, cost total). */
+/** Parse a pi JSONL event stream into (assistant texts, cost total). */
 export function parsePiJsonl(stdout: string): JsonlOutcome {
-  let text = '';
+  const texts: string[] = [];
   let costUsd = 0;
   for (const line of stdout.split(/\r?\n/)) {
     if (!line.trim()) continue;
@@ -71,10 +74,32 @@ export function parsePiJsonl(stdout: string): JsonlOutcome {
     const usage: PiUsage | undefined = ev.usage ?? ev.message?.usage;
     if (usage?.cost?.total !== undefined) costUsd = Math.max(costUsd, usage.cost.total);
     if (ev.type === 'message_end' && ev.message?.role === 'assistant') {
-      text = contentText(ev.message.content);
+      const t = contentText(ev.message.content);
+      // n10: keep EVERY non-empty assistant turn (multi-turn workers with tool
+      // calls emit several message_end events; the final report is NOT always
+      // the last one).
+      if (t.trim()) texts.push(t);
     }
   }
-  return { text, costUsd };
+  return { texts, text: texts[texts.length - 1] ?? '', costUsd };
+}
+
+/**
+ * n10: pick the report body from the assistant turns — the NEWEST turn that
+ * parses as the role's output (the parsers are strict→lenient inside). ''
+ * when nothing parses (caller falls back to the last non-empty text).
+ */
+export function pickReportBody(texts: string[], role: Role): string {
+  for (let i = texts.length - 1; i >= 0; i--) {
+    const t = texts[i]!;
+    const parsed =
+      role === 'observer' ? parseObserverOutput(t)
+      : role === 'extractor' ? parseExtractorOutput(t)
+      : role === 'reflect' ? parseReflectionReport(t)
+      : parseConsolidationReport(t);
+    if (parsed.ok) return t;
+  }
+  return '';
 }
 
 function contentText(content: unknown): string {
@@ -199,8 +224,11 @@ export class PiSubprocessRunner implements ModelRunner {
         // Reap any grandchildren left in the worker's process group (they can
         // outlive the direct child and hold the stdio pipes open).
         this.killTree(proc);
-        const { text, costUsd } = parsePiJsonl(stdout);
-        const body = text.trim() || stdout.trim();
+        const { texts, text, costUsd } = parsePiJsonl(stdout);
+        // n10: a multi-turn worker (consolidator with tool calls) may end with
+        // a message_end that is NOT the report — take the newest turn that
+        // parses as the role's output; fallback: last non-empty text.
+        const body = pickReportBody(texts, role) || text.trim() || stdout.trim();
         if (code !== 0 && !body) {
           finish({
             runId: input.runId,

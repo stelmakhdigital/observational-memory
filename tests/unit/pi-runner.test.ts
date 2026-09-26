@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { PiSubprocessRunner, parsePiJsonl } from '../../src/adapters/pi/runner.js';
+import { PiSubprocessRunner, parsePiJsonl, pickReportBody } from '../../src/adapters/pi/runner.js';
 
 let dir: string;
 let fakePi: string;
@@ -71,7 +71,75 @@ describe('parsePiJsonl', () => {
       ].join('\n'),
     );
     expect(out.text).toBe('hello');
+    expect(out.texts).toEqual(['hello']);
     expect(out.costUsd).toBe(0.003);
+  });
+});
+
+// n10: a multi-turn worker (consolidator with tool calls) emits several
+// message_end events; the FINAL report is not necessarily the LAST message.
+const msgEnd = (text: string) =>
+  JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text }] } });
+const REPORT = 'CONSOLIDATION_REPORT\ntopics: a.md\njourney_changed: true\nconsumed: om-1\ndropped: none\nEND_CONSOLIDATION_REPORT';
+
+describe('n10: report selection from multi-turn JSONL', () => {
+  it('collects all non-empty assistant turns; text = last non-empty', () => {
+    const out = parsePiJsonl(
+      [msgEnd('let me check the files first'), msgEnd(REPORT), msgEnd(' '), msgEnd('')].join('\n'),
+    );
+    expect(out.texts).toEqual(['let me check the files first', REPORT]);
+    expect(out.text).toBe(REPORT);
+  });
+
+  it('picks the report after a tool turn', () => {
+    const { texts } = parsePiJsonl([msgEnd('checking topic files'), msgEnd(REPORT)].join('\n'));
+    expect(pickReportBody(texts, 'consolidator')).toBe(REPORT);
+  });
+
+  it('picks the report when an empty follow-up message comes after it', () => {
+    const { texts } = parsePiJsonl(
+      [msgEnd('checking topic files'), msgEnd(REPORT), msgEnd(' '), msgEnd('done (empty)')].join('\n'),
+    );
+    // 'done (empty)' does not parse as a report → the newest PARSEABLE turn wins
+    expect(pickReportBody(texts, 'consolidator')).toBe(REPORT);
+  });
+
+  it('falls back to the last non-empty text when nothing parses', () => {
+    const { texts, text } = parsePiJsonl([msgEnd('garbage one'), msgEnd('garbage two')].join('\n'));
+    expect(pickReportBody(texts, 'consolidator')).toBe('');
+    expect(text).toBe('garbage two'); // caller: body = pick || text || stdout
+  });
+
+  it('end-to-end: a multi-turn consolidator subprocess yields a parsed report', async () => {
+    const scriptLine = (t: string) => JSON.stringify(msgEnd(t));
+    const multi = path.join(dir, 'fake-pi-multi.mjs');
+    writeFileSync(
+      multi,
+      `const lines = [\n`
+        + `  ${scriptLine('let me check the topic files first')},\n`
+        + `  ${scriptLine(REPORT)},\n`
+        + `  ${scriptLine('  ')},\n`
+        + `  JSON.stringify({ type: 'agent_end', messages: [] })\n`
+        + `];\n`
+        + `process.stdout.write(lines.join('\\n') + '\\n');\n`,
+    );
+    const bin = path.join(dir, 'fake-pi-multi.sh');
+    writeFileSync(bin, `#!/bin/sh\nexec node ${multi} "$@"\n`);
+    chmodSync(bin, 0o755);
+    const r = await new PiSubprocessRunner({
+      piBinary: bin,
+      cwd: dir,
+      observerModel: { id: 'x' },
+      consolidatorModel: { id: 'x' },
+      timeoutMs: 15_000,
+    }).run('consolidator', { runId: 'run-multi', role: 'consolidator', pool: { observations: [], sessionDir: dir, journey: '' } });
+    expect(r.ok).toBe(true);
+    expect(r.consolidation).toEqual({
+      topics: ['a.md'],
+      tombstoneIds: ['om-1'],
+      droppedIds: [],
+      journeyChanged: true,
+    });
   });
 });
 

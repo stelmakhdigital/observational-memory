@@ -317,8 +317,14 @@ export interface RunInfo {
 /** Events outward to the adapter/UI. */
 export interface EventSink {
   onStatus(s: OmStatus): void;
-  /** Adapter forwards the block into the agent's compaction (see spike S1). */
-  onCompactionBlock(b: CompactionBlock): void;
+  /**
+   * Adapter forwards the block into the agent's compaction (see spike S1).
+   * info.shouldResume (auto-resume, FR-3): the auto-compaction left the task
+   * unfinished — after the compaction completes the adapter should send a
+   * hidden "continue" message that triggers a new turn. Never set for manual
+   * compactions.
+   */
+  onCompactionBlock(b: CompactionBlock, info?: { shouldResume: boolean }): void;
   onRunStarted(run: RunInfo): void;
   onRunFinished(run: RunInfo, r: WorkerResult): void;
   onError(e: OmError): void;
@@ -333,6 +339,7 @@ export class OmError extends Error {
       | 'config-invalid'
       | 'ledger-corrupt'
       | 'runner-failed'
+      | 'commit-failed'
       | 'storage-error'
       | 'not-enabled',
   ) {

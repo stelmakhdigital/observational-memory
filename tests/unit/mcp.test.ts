@@ -82,6 +82,9 @@ describe('MCP server (v0.7)', () => {
     beforeEach(() => {
       process.env.OM_MCP_ROOT = dir;
       process.env.OM_MCP_SESSION = S;
+      // keep these tests on the embedded ledger: no pi-session auto-scan
+      delete process.env.OM_MCP_PI_SESSION;
+      process.env.OM_MCP_PI_SESSIONS_DIR = path.join(dir, 'no-sessions');
     });
 
     it('om_status reports observations, topics and cost', () => {

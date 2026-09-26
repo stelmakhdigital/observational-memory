@@ -409,6 +409,33 @@ observational-memory/
   (resolveWorkerModel при boot); runs-счётчик: om.cost пишется при каждом воркере (вкл. $0) → status.runs честный.
   Найден и починен латентный баг теста topK (общий ledger-файл двух сессий).
   Осталось: M4/M5/M6 (P1), перенос механизмов референса (P1.7), интерактивный smoke авто-компакции (P2.13).
+- 2025-09: **Фиксы M6 + n10 + n4 + n5 (аудит 26.09), 260 тестов, typecheck чисто**:
+  (1) M6: commit-ошибка ≠ worker-ошибка — runWorker ретраит ТОЛЬКО коммит (1 раз, синхронно, без LLM);
+  при окончательном падении коммита LLM-результат сохраняется в om.lastError (тексты наблюдений),
+  слайс НЕ помечается покрытым (watermark не двигался) → re-observe в следующем цикле, n9-dedup
+  страхует от дублей при частичном коммите. OmError: новый код 'commit-failed'. (2) n10: parsePiJsonl
+  собирает ВСЕ non-empty assistant-тексты (multi-turn), pickReportBody берёт последний (с конца),
+  PARSE-ABLE-ся парсером роли; fallback — последний non-empty как раньше. (3) n4: resolveContained
+  + realpath существующего префикса (для write-цели — realpath родителя + сегмент), re-check containment
+  по реальным путям; walks ls/grep не следуют symlink'ам за пределы real root.
+  (4) n5: grep-лимиты (500 файлов, 2MB суммарно, 100 совпадений) + правило «простые regex» в prompt
+  consolidator'а. Residual risk (catastrophic backtracking одного regex) остаётся — полная защита
+  только worker-thread timeout (P2).
+- 2025-09: **Фиксы P1 (аудит 26.09) — выполнены, 278 тестов, typecheck чисто**:
+  (1) M5: MCP читает pi-session JSONL напрямую (adapters/mcp/pi-ledger.ts: readPiLedger —
+  type='custom'/customType='om', scanForPiSession top-50 по mtime; приоритет OM_MCP_PI_SESSION →
+  скан → embedded; source-поаметка в om_status; read-only). (2) M6: retry ТОЛЬКО коммита
+  (1 раз, без повторного LLM-вызова); при окончательном падении — lastError с сохранённым
+  LLM-результатом (тексты наблюдений), слайс не покрыт → re-observe (n9-dedup страхует дубли).
+  (3) n10: parsePiJsonl собирает ВСЕ non-empty assistant-тексты + pickReportBody (последний
+  парсящийся отчёт). (4) n4: scoped-tools — realpath префикса + walk не следует за symlink'ами.
+  (5) n5: grep-лимиты (500 файлов / 2MB / 100 совпадений) + правило «простые regex» в prompt.
+  (6) Порт референса: auto-resume после авто-компакции при stopReason length/non-retryable error
+  (runEndedUnfinished + hidden om-resume triggerTurn, конфиг resumeAfterMidRunCompaction default true);
+  canSkipObserverWait — дрейн компакции пропускает observers с fromId > tailBoundary (слайс в tail);
+  **cutoff-snap: найдена реальная дыра** (чанк, пересекающий tail-границу, выпадал и из блока, и из tail)
+  — фикс: снап raw-границы назад на закоммиченный конец чанка (min |tail−target|), инвариант
+  «∅ пересечение, ∪ = вся история» покрыт тестом; JOURNEY-prompt: добавлен запрет «end of session»-языка.
 - 2025-09: **v0.2.0** (тег 3982f98): early activation + fork-seed fix в релизе;
   установка в pi переключена с локального пути на
   `git:github.com/stelmakhdigital/observational-memory@v0.2.0` (settings.json,

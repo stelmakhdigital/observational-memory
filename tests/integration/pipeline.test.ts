@@ -9,8 +9,11 @@ import { sumCosts } from '../../src/core/cost.js';
 import type {
   CompactionBlock,
   EventSink,
+  LedgerEntryType,
+  LedgerStore,
   OmStatus,
   RunInfo,
+  TypedLedgerEntry,
   WorkerInput,
   WorkerResult,
 } from '../../src/core/types.js';
@@ -323,5 +326,126 @@ describe('error handling (NFR-1)', () => {
     expect(ledger.read('om.lastError').length).toBe(1);
     expect(orch3.status().lastError).toBeTruthy();
     expect(sink.errors.length).toBe(1);
+  });
+});
+
+// M6: a COMMIT failure must not re-run the LLM. The commit is retried once
+// (synchronously, no LLM); a final commit failure keeps the result in
+// om.lastError and leaves the slice un-covered (re-observed later).
+
+/** Ledger whose first N om.observation appends throw (simulated commit failure). */
+class FlakyCommitLedger implements LedgerStore {
+  private fails = 0;
+  constructor(private inner: MockLedger, private failTimes: number) {}
+  append<T extends LedgerEntryType>(entry: TypedLedgerEntry<T>): void {
+    if (entry.type === 'om.observation' && this.fails < this.failTimes) {
+      this.fails++;
+      throw new Error('simulated ledger commit failure');
+    }
+    this.inner.append(entry);
+  }
+  read<T extends LedgerEntryType>(type?: T): TypedLedgerEntry<T>[] {
+    return this.inner.read(type);
+  }
+  tombstone(ids: string[], report: Parameters<LedgerStore['tombstone']>[1]): void {
+    this.inner.tombstone(ids, report);
+  }
+}
+
+const okConsolidator = {
+  result: (input: WorkerInput): WorkerResult => ({
+    runId: input.runId,
+    ok: true,
+    consolidation: { topics: [], tombstoneIds: [], droppedIds: [], journeyChanged: false },
+  }),
+};
+
+describe('M6: commit failure vs worker failure', () => {
+  it('retries ONLY the commit (exactly 1 LLM run) when the first commit fails', async () => {
+    const runner2 = new MockRunner(
+      { result: (i: WorkerInput) => ({ runId: i.runId, ok: true, observations: drafts('committed note') }) },
+      okConsolidator,
+    );
+    const ledger2 = new FlakyCommitLedger(ledger, 1);
+    const orch2 = new OmOrchestrator({
+      config: baseConfig,
+      sessionId: 's-m6a',
+      history,
+      ledger: ledger2,
+      runner: runner2,
+      memory,
+      sink,
+    });
+    orch2.setEnabled(true);
+    history.add('m1', 'aaaaaaaaaa');
+    orch2.onTurnEnd();
+    await runner2.drain();
+    await orch2.shutdown();
+
+    expect(runner2.calls.filter((c) => c.role === 'observer').length).toBe(1); // NO LLM re-run
+    expect(ledger2.read('om.observation').length).toBe(1); // commit retry succeeded
+    expect(ledger2.read('om.lastError')).toEqual([]);
+  });
+
+  it('keeps the LLM result in lastError and leaves the slice un-covered when the commit keeps failing', async () => {
+    const runner2 = new MockRunner(
+      { result: (i: WorkerInput) => ({ runId: i.runId, ok: true, observations: drafts('committed note') }) },
+      okConsolidator,
+    );
+    const ledger2 = new FlakyCommitLedger(ledger, Number.MAX_SAFE_INTEGER);
+    const orch2 = new OmOrchestrator({
+      config: baseConfig,
+      sessionId: 's-m6b',
+      history,
+      ledger: ledger2,
+      runner: runner2,
+      memory,
+      sink,
+    });
+    orch2.setEnabled(true);
+    history.add('m1', 'aaaaaaaaaa');
+    orch2.onTurnEnd();
+    await runner2.drain();
+    await orch2.shutdown();
+
+    expect(runner2.calls.filter((c) => c.role === 'observer').length).toBe(1); // LLM result NOT repeated
+    expect(ledger2.read('om.observation')).toEqual([]);
+    const errs = ledger2.read('om.lastError');
+    expect(errs.length).toBe(1);
+    expect(errs[0]!.data.message).toContain('committed note'); // result preserved, data not lost
+    // Slice is NOT covered: the next cycle re-observes the same chunk
+    // (n9 dedup by sourceRange.fromId guards against partial-commit dups).
+    orch2.onTurnEnd();
+    await runner2.drain();
+    await orch2.shutdown();
+    expect(runner2.calls.filter((c) => c.role === 'observer').length).toBe(2);
+  });
+
+  it('still re-runs the LLM once on a WORKER (LLM) failure (behavior unchanged)', async () => {
+    const flaky = new MockRunner(
+      {
+        result: (i: WorkerInput) => ({ runId: i.runId, ok: true, observations: drafts('ok note') }),
+        failFirst: 1,
+      },
+      okConsolidator,
+    );
+    const orch2 = new OmOrchestrator({
+      config: baseConfig,
+      sessionId: 's-m6c',
+      history,
+      ledger,
+      runner: flaky,
+      memory,
+      sink,
+    });
+    orch2.setEnabled(true);
+    history.add('m1', 'aaaaaaaaaa');
+    orch2.onTurnEnd();
+    await flaky.drain();
+    await orch2.shutdown();
+
+    expect(flaky.calls.filter((c) => c.role === 'observer').length).toBe(2); // 1 attempt + 1 retry
+    expect(ledger.read('om.observation').length).toBe(1);
+    expect(ledger.read('om.lastError')).toEqual([]);
   });
 });

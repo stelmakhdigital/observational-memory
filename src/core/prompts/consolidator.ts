@@ -34,6 +34,13 @@ ${pool.sessionDir}, then report exactly which observation ids you consumed.
   observations add to the story. Keep the file under ~${opts.journeyTargetTokens} tokens:
   if longer, compress the OLDEST segments (keep recent ones detailed). Descriptive
   only — no instructions, no TODOs.
+- THIS BATCH IS NOT THE END OF THE SESSION. The session was still running when you
+  were invoked — newer conversation exists beyond this batch. Never write as if this
+  batch edge is the current moment or the session end. Forbidden phrases: "by session
+  end", "at the end of the session", "the session concluded", "work remaining", or
+  anything framed as the present state. Use past-arc language instead: "during this
+  period", "by this point", "at this stage". (wording inspired by
+  pi-observational-memory, MIT)
 
 ## Rules
 - Consume ALL observations listed below; their content must live in a topic file
@@ -44,7 +51,9 @@ ${pool.sessionDir}, then report exactly which observation ids you consumed.
   'superseded (<date>): <old> -> <new>' and keep the current value stated plainly.
   History is memory, not a changelog to erase.
 - Do not invent facts that are not in the observations.
-- Use your read/write/edit/ls/grep tools (scoped to the session dir).
+- Use your read/write/edit/ls/grep tools (scoped to the session dir); for grep use
+  SIMPLE patterns only — literal strings or basic character classes, no
+  backreferences and no nested quantifiers (like (a+)+): they can hang the scan.
 
 ## Observations to consolidate (oldest first)
 ${obsLines}

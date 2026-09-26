@@ -77,6 +77,28 @@ export function renderCurrentTask(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+/**
+ * M6: compact rendering of an LLM result for om.lastError — the observations
+ * texts verbatim, other roles as capped JSON (nothing important is lost).
+ */
+function summarizeWorkerResult(res: WorkerResult): string {
+  if (res.observations && res.observations.length > 0) {
+    return res.observations.map((d) => `- ${d.text}`).join('\n');
+  }
+  const rest: Record<string, unknown> = { ...res };
+  delete rest.runId;
+  delete rest.ok;
+  delete rest.costUsd;
+  delete rest.observations;
+  delete rest.error;
+  try {
+    const s = JSON.stringify(rest) ?? '{}';
+    return s.length > 2000 ? `${s.slice(0, 2000)}…` : s;
+  } catch {
+    return '(unserializable)';
+  }
+}
+
 export interface OrchestratorDeps {
   config: OmConfig;
   sessionId: string;
@@ -96,6 +118,9 @@ interface InFlight {
   role: Role;
   startedAt: string;
   promise: Promise<void>;
+  /** Observer chunk provenance — drain fast path (FR-3.4, see mustWaitFor). */
+  coversUpToId?: string;
+  fromId?: string;
 }
 
 export class OmOrchestrator {
@@ -113,6 +138,15 @@ export class OmOrchestrator {
   private extracting = false;
   private lastGapMarkedFor: Date | null = null;
   private compactedForTokens = 0;
+  /**
+   * Auto-resume (FR-3): the just-ended agent run left the task unfinished
+   * (adapter decision from the agent_end event); consumed by the next
+   * auto-compaction. Manual compactions never see a stale flag: it is set
+   * immediately before the auto runCompaction and cleared after every emit.
+   */
+  private pendingResume = false;
+  /** Set in onAgentEnd; fed into pendingResume on the next auto-compaction. */
+  private lastRunUnfinished = false;
   private earlyTimer: ReturnType<typeof setTimeout> | null = null;
   private reflectTimer: ReturnType<typeof setTimeout> | null = null;
   private reflecting = false;
@@ -219,14 +253,19 @@ export class OmOrchestrator {
     this.startObserver(chunk.coversUpToId, chunk.text, chunk.overlapContext, chunk.fromId);
   }
 
-  async onAgentEnd(): Promise<void> {
+  async onAgentEnd(opts?: { runUnfinished?: boolean }): Promise<void> {
     if (!this.enabled || this.cfg.passive) return;
+    // Auto-resume input: the adapter decides from the agent_end event whether
+    // the run ended with the task unfinished (stopReason 'length' / a
+    // non-retryable 'error'); core treats it as an opaque flag.
+    this.lastRunUnfinished = !!opts?.runUnfinished;
     this.maybeMarkGap();
     this.scheduleReflectIdleCheck();
     const tokens = this.d.history.currentTokens();
     if (tokens >= this.cfg.compactAtContextTokens && tokens > this.compactedForTokens) {
       if (this.d.history.isIdle()) {
         this.compactedForTokens = tokens;
+        this.pendingResume = this.cfg.resumeAfterMidRunCompaction && this.lastRunUnfinished;
         await this.runCompaction();
       }
     }
@@ -243,12 +282,18 @@ export class OmOrchestrator {
    * quiescent drains (shutdown/compaction) terminate even for follow-up runs
    * spawned while draining.
    */
-  private trackTask(runId: string, role: Role, startedAt: string, task: Promise<void>): void {
+  private trackTask(
+    runId: string,
+    role: Role,
+    startedAt: string,
+    task: Promise<void>,
+    extra?: { coversUpToId?: string; fromId?: string },
+  ): void {
     const tracked = task.finally(() => {
       const i = this.inFlight.findIndex((r) => r.runId === runId);
       if (i !== -1) this.inFlight.splice(i, 1);
     });
-    this.inFlight.push({ runId, role, startedAt, promise: tracked });
+    this.inFlight.push({ runId, role, startedAt, promise: tracked, ...extra });
   }
 
   private pumpObservers(): void {
@@ -282,7 +327,7 @@ export class OmOrchestrator {
     ).finally(() => {
       this.pendingChunks.delete(coversUpToId);
     });
-    this.trackTask(runId, 'observer', this.now().toISOString(), task);
+    this.trackTask(runId, 'observer', this.now().toISOString(), task, { coversUpToId, fromId });
   }
 
   private commitObservations(runId: string, coversUpToId: string, fromId: string | undefined, res: WorkerResult): void {
@@ -508,19 +553,46 @@ export class OmOrchestrator {
   // ---- compaction (FR-3) ---------------------------------------------------
 
   private async runCompaction(): Promise<void> {
-    await this.d.runner.drain?.();
+    // Auto-resume (FR-3): capture-and-clear BEFORE any await so a concurrent
+    // manual compaction (forceCompact) can never pick up a stale flag.
+    const shouldResume = this.pendingResume;
+    this.pendingResume = false;
     // Quiescent drain: workers may spawn follow-ups (e.g. post-consolidation
     // extraction) after the snapshot; loop until nothing is in flight.
+    //
+    // R5 fast path (ported from pi-observational-memory's canSkipObserverWait,
+    // MIT): an in-flight observer whose WHOLE slice lies in the verbatim tail
+    // cannot change the rendered block — the tail keeps that history verbatim,
+    // so its yet-uncommitted observations add nothing. Skip it (and skip the
+    // runner drain: it would otherwise wait on the same subprocess anyway).
+    const boundary = this.tailBoundaryId();
+    let waited = false;
     for (;;) {
-      const inflight = this.inFlight.slice();
-      if (inflight.length === 0) break;
-      await Promise.allSettled(inflight.map((r) => r.promise));
+      const wait = this.inFlight.slice().filter((t) => this.mustWaitFor(t, boundary));
+      if (wait.length === 0) break;
+      waited = true;
+      await Promise.allSettled(wait.map((r) => r.promise));
     }
     this.inFlight = [];
+    if (waited) await this.d.runner.drain?.();
     const block = this.compactBlock();
-    this.d.sink.onCompactionBlock(block);
+    this.d.sink.onCompactionBlock(block, { shouldResume });
     this.log(`compaction block emitted (${block.observations ? block.observations.length : 0} chars)`);
     this.emitStatus();
+  }
+
+  /**
+   * May compaction skip waiting for this in-flight worker? Non-observers
+   * (consolidator/extractor/reflect) always block the render. An observer
+   * is skippable when its slice starts strictly AFTER the tail boundary
+   * (fromId > boundary): the slice is then fully inside the verbatim tail.
+   * We check fromId, not coversUpToId: an in-flight chunk straddling the
+   * boundary would leave its pre-tail part in neither the block nor the tail.
+   * Unknown provenance → conservative wait (the reference does the same).
+   */
+  private mustWaitFor(t: InFlight, boundary: string): boolean {
+    if (t.role !== 'observer') return true;
+    return !(t.fromId && t.fromId > boundary);
   }
 
   forceCompact(): Promise<void> {
@@ -644,8 +716,7 @@ export class OmOrchestrator {
    */
   compactionPlan(): { block: CompactionBlock; tailBoundaryId: string } {
     const pool = this.pool();
-    const prog = this.watermark();
-    const tailBoundaryId = this.d.history.tailStartIdFor?.(this.cfg.tailTokens) ?? prog.coversUpToId;
+    const tailBoundaryId = this.tailBoundaryId();
     let observations = selectBeforeTail(pool.observations, tailBoundaryId);
     // v0.5: deterministic injection modes — topK trims by priority budget.
     // audit M3: the observations part of the block is ALWAYS capped — for
@@ -682,6 +753,47 @@ export class OmOrchestrator {
       generatedAt: this.now().toISOString(),
     });
     return { block, tailBoundaryId };
+  }
+
+  /**
+   * Tail boundary (last message NOT in the verbatim tail), snapped BACKWARD
+   * to a committed chunk boundary (FR-3.4; snap idea ported from
+   * pi-observational-memory's snapCutoff, MIT). No chunk may straddle the
+   * cutoff: the observation block and the verbatim tail are then disjoint and
+   * together cover the whole pre-compaction history (no "hole" of messages
+   * that are in neither). '' when the tail covers the whole history.
+   *
+   * Conservative on purpose: the snap only moves the boundary EARLIER (to a
+   * committed chunk end with id < the raw boundary) and, among candidates, the
+   * one whose resulting tail is closest to tailTokens — the reference's rule.
+   * Never moving it forward keeps the tail a superset of the raw one.
+   */
+  tailBoundaryId(): string {
+    const raw = this.d.history.tailStartIdFor?.(this.cfg.tailTokens) ?? this.watermark().coversUpToId;
+    if (raw === '') return '';
+    // Committed chunk ends: ALL om.observation entries (consolidated ones too —
+    // their chunks stay represented via topics/journey, not the block).
+    const boundaries = new Set<string>();
+    for (const e of this.d.ledger.read<'om.observation'>('om.observation')) {
+      if (e.data.coversUpToId) boundaries.add(e.data.coversUpToId);
+    }
+    let best: string | null = null;
+    let bestDelta = Number.POSITIVE_INFINITY;
+    for (const b of boundaries) {
+      if (b > raw) continue; // conservative: never move the cutoff forward
+      let tail: number;
+      try {
+        tail = this.d.history.unobservedTokens(b);
+      } catch {
+        continue;
+      }
+      const delta = Math.abs(tail - this.cfg.tailTokens);
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        best = b;
+      }
+    }
+    return best ?? raw;
   }
 
   // ---- recall (v0.5) ---------------------------------------------------------
@@ -743,7 +855,28 @@ export class OmOrchestrator {
         .then((res) => {
           if (!res.ok) throw new Error(res.error ?? 'worker failed');
           this.recordRun(input.runId, input.role, 'ok', res.costUsd);
-          onSuccess(res);
+          // M6: a COMMIT failure is NOT a worker failure. The .catch below
+          // would retry the WHOLE worker — re-running the LLM and paying for it.
+          // Instead the commit is retried once, synchronously, without the LLM.
+          // If the commit ultimately fails: the LLM result is preserved in
+          // om.lastError (data is not lost) and the slice is left UNCOVERED —
+          // the watermark only moves on a successful commit, so the slice is
+          // re-observed on a later cycle; foldPool's sourceRange.fromId dedup
+          // (n9) guards against duplicates from a partially committed attempt.
+          let commitErr: unknown = null;
+          try {
+            onSuccess(res);
+          } catch (e) {
+            commitErr = e;
+            this.log(`commit for ${input.runId} failed, retrying commit once (no LLM re-run)`);
+            try {
+              onSuccess(res);
+              commitErr = null; // retry succeeded
+            } catch (e2) {
+              commitErr = e2;
+            }
+          }
+          if (commitErr !== null) this.handleCommitFailure(input, commitErr, res);
         })
         .catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
@@ -762,6 +895,25 @@ export class OmOrchestrator {
           this.emitStatus();
         });
     return attempt(1);
+  }
+
+  /**
+   * M6: final commit failure. The LLM run was recorded 'ok' (cost is real);
+   * we only record the error with the result payload so nothing is lost.
+   */
+  private handleCommitFailure(input: WorkerInput, err: unknown, res: WorkerResult): void {
+    const msg = err instanceof Error ? err.message : String(err);
+    const detail = `commit failed (run ${input.runId}, ${input.role}) after 1 commit-retry: ${msg};\nresult: ${summarizeWorkerResult(res)}`;
+    const at = this.now().toISOString();
+    try {
+      this.d.ledger.append({ type: 'om.lastError', data: { message: detail, at }, at });
+      this.d.sink.onError(new OmError(detail, 'commit-failed'));
+    } catch (e) {
+      this.log(`commit-failure recording failed: ${String(e)}`);
+      return;
+    }
+    this.log(detail);
+    this.emitStatus();
   }
 
   private recordRun(runId: string, role: Role, status: 'ok' | 'error', costUsd?: number, error?: string): void {

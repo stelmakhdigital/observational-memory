@@ -83,6 +83,16 @@ export interface OmConfig {
   /** Context usage that triggers compaction (FR-3.1). */
   compactAtContextTokens: number;
   /**
+   * Auto-resume after an auto-compaction that left the task unfinished
+   * (ported from pi-observational-memory, MIT): after the adapter's
+   * compaction completes, a hidden "continue where you left off" message
+   * triggers a new agent turn — but ONLY when the just-ended run did not
+   * terminate cleanly (stopReason 'length' / non-retryable 'error'; the
+   * per-run decision is made by the adapter, which owns the event shapes).
+   * Manual compactions (/om:compact) never resume. Default: true.
+   */
+  resumeAfterMidRunCompaction: boolean;
+  /**
    * Hard budget in tokens for the observations part of the compaction block
    * (audit M3); applies to BOTH inject modes — 'full' means "the whole pool,
    * but never more than this". Default: min(0.4 × compactAtContextTokens,
@@ -133,6 +143,7 @@ export const DEFAULT_CONFIG: OmConfig = {
   // = 3 × consolidateAtPoolTokens (re-derived in resolveConfig, see above)
   poolHardCapTokens: 60000,
   compactAtContextTokens: 100000,
+  resumeAfterMidRunCompaction: true,
   // = min(0.4 × compactAtContextTokens, poolHardCapTokens) (re-derived)
   maxCompactBlockTokens: 40000,
   tailTokens: 20000,
