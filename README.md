@@ -83,7 +83,7 @@ npm test            # vitest (без LLM)
 подхватывается автоматически):
 
 ```bash
-pi install git:github.com/stelmakhdigital/observational-memory@v0.4.0   # тег
+pi install git:github.com/stelmakhdigital/observational-memory@v0.5.1   # тег
 pi install /абсолютный/путь/к/observational-memory               # локальный каталог
 pi -e /абсолютный/путь/к/observational-memory                    # один раз, без установки
 pi remove git:github.com/stelmakhdigital/observational-memory          # удалить
