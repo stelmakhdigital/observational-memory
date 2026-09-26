@@ -12,11 +12,21 @@
     "node": ">=20"
   },
   "exports": {
-    "./core": "./src/core/index.ts",
-    "./adapters/pi": "./src/adapters/pi/index.ts",
-    "./adapters/mcp": "./src/adapters/mcp/server.ts"
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "default": "./dist/core/index.js"
+    },
+    "./adapters/pi": {
+      "types": "./dist/adapters/pi/index.d.ts",
+      "default": "./dist/adapters/pi/index.js"
+    },
+    "./adapters/mcp": {
+      "types": "./dist/adapters/mcp/server.d.ts",
+      "default": "./dist/adapters/mcp/server.js"
+    }
   },
   "files": [
+    "dist",
     "src"
   ],
   "scripts": {
@@ -24,9 +34,11 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
-    "demo": "npm run build && node dist/examples/embedded-demo.js",
-    "eval": "npm run build && node dist/eval/run.js",
-    "mcp": "npm run build && node dist/src/adapters/mcp/server.js"
+    "build:scripts": "tsc -p tsconfig.build.scripts.json",
+    "prepare": "npm run build",
+    "demo": "npm run build:scripts && node dist-scripts/examples/embedded-demo.js",
+    "eval": "npm run build:scripts && node dist-scripts/eval/run.js",
+    "mcp": "npm run build && node dist/adapters/mcp/server.js"
   },
   "peerDependencies": {
     "typebox": "*"

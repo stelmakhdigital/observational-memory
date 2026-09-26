@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-scripts/
 .memory/
 *.log
 eval/report.json

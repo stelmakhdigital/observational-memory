@@ -436,6 +436,15 @@ observational-memory/
   **cutoff-snap: найдена реальная дыра** (чанк, пересекающий tail-границу, выпадал и из блока, и из tail)
   — фикс: снап raw-границы назад на закоммиченный конец чанка (min |tail−target|), инвариант
   «∅ пересечение, ∪ = вся история» покрыт тестом; JOURNEY-prompt: добавлен запрет «end of session»-языка.
+- 2025-09: **Фиксы P2 + релиз v0.5.0 (26.09)**: (1) M4 FileLedgerStore — O_EXCL-lock,
+  re-check на append, commit = O_APPEND + fsync, crash-repair (partial-строка → onRepair(lineNo)
+  + repairCount, не молча); (2) n6 — in-memory индекс (нет readFileSync на каждый вызов);
+  (3) P2.12 packaging: exports/types → собранный dist (tsconfig.build, rootDir src), prepare:
+  npm run build, files [dist, src] (pi git-install — src, не тронут), consumer-проверено: tarball
+  → чистый Node ESM; eval/examples → dist-scripts; (4) P2.14 README-дефолты синхронизированы.
+  289 тестов (31 файл), typecheck чисто. Ручные P2.13/15 (TUI-smoke авто-компакции, gap-markers/
+  reflect живьём) — пользователю (в audit.md). Release **v0.5.0**: P0+P1+P2 волна фиксов
+  (критичный C1 ветвление, 6 major, 4 механизма референса, packaging).
 - 2025-09: **v0.2.0** (тег 3982f98): early activation + fork-seed fix в релизе;
   установка в pi переключена с локального пути на
   `git:github.com/stelmakhdigital/observational-memory@v0.2.0` (settings.json,

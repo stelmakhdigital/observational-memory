@@ -27,3 +27,45 @@ describe('pi package packaging (git install)', () => {
     expect(Object.keys(pkg.dependencies ?? {})).toEqual([]);
   });
 });
+
+describe('npm packaging (dist build, P2.12)', () => {
+  const EXPORTS: Record<string, { types: string; default: string }> = {
+    './core': { types: './dist/core/index.d.ts', default: './dist/core/index.js' },
+    './adapters/pi': { types: './dist/adapters/pi/index.d.ts', default: './dist/adapters/pi/index.js' },
+    './adapters/mcp': { types: './dist/adapters/mcp/server.d.ts', default: './dist/adapters/mcp/server.js' },
+  };
+
+  it('exports point at the built dist (plain-Node ESM), with .d.ts types', () => {
+    expect(pkg.exports).toMatchObject(EXPORTS);
+    for (const [name, { types, default: d }] of Object.entries(EXPORTS)) {
+      expect(pkg.exports[name]).toEqual({ types, default: d });
+      expect(d.endsWith('.js')).toBe(true);
+      expect(types.endsWith('.d.ts')).toBe(true);
+    }
+  });
+
+  it('exports never point at .ts sources (plain Node cannot load them)', () => {
+    for (const entry of Object.values(pkg.exports) as Array<{ types: string; default: string }>) {
+      expect(entry.default).toMatch(/^\.\/dist\/.*\.js$/);
+      expect(entry.types).toMatch(/^\.\/dist\/.*\.d\.ts$/);
+    }
+  });
+
+  it('files ships both dist (npm consumer) and src (pi git install loads .ts natively)', () => {
+    expect(pkg.files).toContain('dist');
+    expect(pkg.files).toContain('src');
+  });
+
+  it('prepare builds dist on install (npm install <git-url> / pi install git:)', () => {
+    expect(pkg.scripts.prepare).toBe('npm run build');
+    expect(pkg.scripts.build).toContain('tsconfig.build.json');
+  });
+
+  it('dist layout matches exports (only asserted when a build is present)', () => {
+    if (!existsSync(path.join(root, 'dist/core/index.js'))) return; // pre-build is fine
+    for (const { types, default: d } of Object.values(EXPORTS)) {
+      expect(existsSync(path.join(root, d))).toBe(true);
+      expect(existsSync(path.join(root, types))).toBe(true);
+    }
+  });
+});

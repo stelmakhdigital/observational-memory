@@ -101,6 +101,21 @@ typebox — peerDependency, поставляется самим pi).
 `/om:extract`, `/om:recall`, `/om:reflect`, `/om:seed-from` и тул `om_recall`
 (агент ищет в памяти сам, посреди диалога).
 
+### Для npm-потребителя (embedded, без pi)
+
+Публичные exports пакета указывают на **собранный** `dist/` (чистый Node ESM,
+Node ≥ 20) — `npm install @stelmakhdigital/observational-memory` (или
+`<git-url>`/`npm pack`) сам запускает `prepare` → `npm run build`, так что
+import из npm работает «из коробки»:
+
+```ts
+import { createOmSession } from '@stelmakhdigital/observational-memory/core';
+// доступны также: /adapters/pi, /adapters/mcp
+```
+
+В пакете идут и `dist/` (npm-потребитель) и `src/` (pi git-install грузит
+`src/adapters/pi/index.ts` нативно, без сборки).
+
 ## Использование
 
 ```
@@ -136,6 +151,9 @@ typebox — peerDependency, поставляется самим pi).
     "poolHardCapTokens": 60000,     // hard cap пула (по умолч. = 3 × consolidateAtPoolTokens);
                                     // выше него консолидация форсится на каждом turn_end
     "compactAtContextTokens": 100000, // порог контекста для компакции (тонировать под модель)
+    "resumeAfterMidRunCompaction": true, // после авто-компакции, прервавшей ход
+                                         // (stopReason length/ошибка), — скрытое "продолжи"
+                                         // (ручная /om:compact не возобновляется)
     "maxCompactBlockTokens": 40000,  // max размер наблюдений-части компакционного блока (по
                                     // умолч. = min(0.4 × compactAtContextTokens, poolHardCapTokens));
                                     // действует и для "full": «весь пул, но не больше бюджета»
@@ -225,6 +243,7 @@ entries всех веток.
 ```ts
 import { createOmSession, type HistorySource, type ModelRunner } from
   '@stelmakhdigital/observational-memory/core';
+// npm-путь: import резолвится в собранный dist (см. «Для npm-потребителя»).
 
 const session = createOmSession({
   root: path.join(projectDir, '.memory'), // долгие файлы + ledger.jsonl
