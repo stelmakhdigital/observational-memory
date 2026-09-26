@@ -94,12 +94,38 @@ export function foldPool(
     }
   }
 
+  // n9 (/tree re-observe): a slice is identified by sourceRange.fromId. When
+  // the watermark of a dead branch is not found in the current branch, the
+  // same slice is re-observed under a NEW run and the new observations get
+  // fresh ids — id-based dedupe alone would keep BOTH sets in the pool.
+  // Rule (commit order): for each fromId only the LATEST run's observations
+  // are active; earlier runs of the same slice are superseded. Same-run
+  // siblings (one commit = several observations, same fromId) and other
+  // slices (different fromId) are untouched.
+  let latestRunByFromId: Map<string, string> | undefined;
+  for (const e of observations) {
+    const fromId = e.data.sourceRange?.fromId;
+    const runId = e.meta?.runId;
+    if (fromId === undefined || runId === undefined) continue; // legacy → id-only dedupe
+    latestRunByFromId ??= new Map();
+    latestRunByFromId.set(fromId, runId);
+  }
+  const superseded = new Set<string>();
+  if (latestRunByFromId) {
+    for (const e of observations) {
+      const fromId = e.data.sourceRange?.fromId;
+      const runId = e.meta?.runId;
+      if (fromId === undefined || runId === undefined) continue;
+      if (latestRunByFromId.get(fromId) !== runId) superseded.add(e.data.id);
+    }
+  }
+
   const seen = new Set<string>();
   const active: Observation[] = [];
   let tokens = 0;
   for (const e of observations) {
     const o = e.data;
-    if (removed.has(o.id) || seen.has(o.id)) continue; // dedupe by id (NFR-1)
+    if (removed.has(o.id) || seen.has(o.id) || superseded.has(o.id)) continue; // dedupe by id + slice supersession
     seen.add(o.id);
     active.push(o);
     tokens += o.tokenCount;

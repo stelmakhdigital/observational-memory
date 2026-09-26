@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { PiHistorySource, messageText } from '../../src/adapters/pi/history.js';
+import {
+  firstBranchEntryIdAfter,
+  messageText,
+  PiHistorySource,
+} from '../../src/adapters/pi/history.js';
 import { estimateTokens } from '../../src/core/tokens.js';
-import type { PiContext, PiEntry } from '../../src/adapters/pi/types.js';
+import type { PiContext, PiEntry, PiSessionManager } from '../../src/adapters/pi/types.js';
 
 const msg = (id: string, text: string, role = 'user', ts = '2025-09-21T10:00:00Z'): PiEntry => ({
   type: 'message',
@@ -138,5 +142,88 @@ describe('PiHistorySource', () => {
 
   it('lastMessageAt is the newest message timestamp', () => {
     expect(src.lastMessageAt()?.toISOString()).toBe('2025-09-21T10:00:00.000Z');
+  });
+
+  describe('branching (C1: getBranch, not getEntries)', () => {
+    // Tree: a — b — c (live) and b — d (dead branch, switched away via /tree).
+    const a = msg('b1', t1, 'user');
+    const b = msg('b2', t2, 'user');
+    const c = msg('b3', t2, 'user', '2025-09-21T11:00:00Z');
+    const d = msg('b4', 'DEAD BRANCH TEXT', 'user', '2025-09-21T10:30:00Z');
+    // full file (append order, both branches) vs current branch only
+    const all = [a, b, d, c];
+    const branch = [a, b, c];
+    const sm: PiSessionManager = {
+      getEntries: () => all,
+      getBranch: () => branch,
+      getSessionId: () => 's',
+      getHeader: () => ({ id: 's', cwd: '/tmp', timestamp: 't' }),
+    };
+    const ctx = makeCtx(branch) as PiContext;
+    const srcB = new PiHistorySource(
+      () => sm,
+      () => ({ ...ctx, sessionManager: sm, getContextUsage: () => undefined }),
+      { chunkTokens: T1 + T2 },
+    );
+
+    it('messages() returns only the current branch (ascending)', () => {
+      const ids = srcB.messages().map((m) => m.id);
+      expect(ids).toEqual(['b1', 'b2', 'b3']);
+      expect(srcB.messages().map((m) => m.text).join(' ')).not.toContain('DEAD BRANCH TEXT');
+    });
+
+    it('dead-branch messages do not enter chunks or the tail', () => {
+      // budget T1+T2: first chunk = b1+b2 (boundary b2), nothing after that
+      const first = srcB.nextChunk({ coversUpToId: '', observedTokens: 0 });
+      expect(first).not.toBeNull();
+      expect(first!.coversUpToId).toBe('b2');
+      expect(first!.text).not.toContain('DEAD BRANCH TEXT');
+      const second = srcB.nextChunk({ coversUpToId: 'b2', observedTokens: T1 });
+      expect(second).toBeNull(); // nothing beyond the branch leaf
+      expect(srcB.tailVerbatim('', 10 * T2)).not.toContain('DEAD BRANCH TEXT');
+      expect(srcB.tailVerbatim('unknown', 10 * T2)).not.toContain('DEAD BRANCH TEXT');
+      expect(srcB.unobservedTokens('unknown')).toBe(T1 + 2 * T2); // branch only
+    });
+
+    it('lastMessageAt ignores dead-branch messages', () => {
+      expect(srcB.lastMessageAt()?.toISOString()).toBe('2025-09-21T11:00:00.000Z');
+    });
+
+    it('watermark from a dead branch rolls back to the start of the branch', () => {
+      // b4 exists in the file but not in the branch → indexAfter → 0
+      expect(srcB.unobservedTokens('b4')).toBe(T1 + 2 * T2);
+      expect(srcB.tailStartIdFor(10 * T2)).toBe('');
+      // n9 precondition: re-observe from scratch picks up the whole branch
+      const chunk = srcB.nextChunk({ coversUpToId: 'b4', observedTokens: 0 });
+      expect(chunk).not.toBeNull();
+      expect(chunk!.fromId).toBe('b1');
+      expect(chunk!.text).not.toContain('DEAD BRANCH TEXT');
+    });
+  });
+
+  describe('firstBranchEntryIdAfter (C1: firstKeptEntryId within the branch)', () => {
+    const sm = (branch: PiEntry[], all?: PiEntry[]): PiSessionManager => ({
+      getEntries: () => all ?? branch,
+      getBranch: () => branch,
+      getSessionId: () => 's',
+      getHeader: () => ({ id: 's', cwd: '/tmp', timestamp: 't' }),
+    });
+    const a = msg('b1', t1);
+    const b = msg('b2', t2);
+    const c = msg('b3', t2);
+    const d = msg('b4', t2); // dead branch entry appended after c in the file
+
+    it('returns the next entry of the CURRENT branch, not the file', () => {
+      const s = sm([a, b, c], [a, b, c, d]);
+      expect(firstBranchEntryIdAfter(s, 'b1', 'fb')).toBe('b2');
+      // b3 is the branch leaf; the file successor b4 (dead branch) must be ignored
+      expect(firstBranchEntryIdAfter(s, 'b3', 'fb')).toBe('fb');
+    });
+
+    it('falls back for empty/unknown boundaries', () => {
+      const s = sm([a, b, c], [a, b, c, d]);
+      expect(firstBranchEntryIdAfter(s, '', 'fb')).toBe('fb');
+      expect(firstBranchEntryIdAfter(s, 'b4', 'fb')).toBe('fb'); // dead branch id not on branch
+    });
   });
 });

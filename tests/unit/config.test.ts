@@ -46,9 +46,46 @@ describe('validateConfig', () => {
     expect(() => validateConfig(DEFAULT_CONFIG)).not.toThrow();
   });
 
-  it('rejects missing model ids', () => {
+  it('accepts empty model ids (n11: inherit the host model)', () => {
+    expect(DEFAULT_CONFIG.models.observer.id).toBe('');
+    expect(DEFAULT_CONFIG.models.consolidator.id).toBe('');
     expect(() =>
-      validateConfig({ ...DEFAULT_CONFIG, models: { observer: { id: '' }, consolidator: { id: 'x' } } }),
+      validateConfig({
+        ...DEFAULT_CONFIG,
+        models: { observer: { id: '' }, consolidator: { id: '', thinking: 'high' } },
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects missing model refs', () => {
+    expect(() =>
+      validateConfig({ ...DEFAULT_CONFIG, models: undefined as never }),
     ).toThrow(/models/);
+  });
+});
+
+describe('M3 derived defaults (poolHardCapTokens / maxCompactBlockTokens)', () => {
+  it('re-derives from related thresholds when the user overrides them', () => {
+    const c = resolveConfig({ consolidateAtPoolTokens: 40000, compactAtContextTokens: 200000 });
+    expect(c.poolHardCapTokens).toBe(120000); // 3 × 40000
+    expect(c.maxCompactBlockTokens).toBe(80000); // min(0.4 × 200000, 120000)
+    const c2 = resolveConfig({ compactAtContextTokens: 200000 });
+    expect(c2.poolHardCapTokens).toBe(60000); // default: 3 × 20000
+    expect(c2.maxCompactBlockTokens).toBe(60000); // min(80000, cap)
+  });
+
+  it('honors explicit overrides', () => {
+    const c = resolveConfig({ poolHardCapTokens: 99999, maxCompactBlockTokens: 1234 });
+    expect(c.poolHardCapTokens).toBe(99999);
+    expect(c.maxCompactBlockTokens).toBe(1234);
+  });
+
+  it('rejects poolHardCapTokens below consolidateAtPoolTokens', () => {
+    expect(() => resolveConfig({ consolidateAtPoolTokens: 10000, poolHardCapTokens: 5000 }))
+      .toThrow(/poolHardCapTokens/);
+  });
+
+  it('rejects non-positive maxCompactBlockTokens', () => {
+    expect(() => resolveConfig({ maxCompactBlockTokens: 0 })).toThrow(/maxCompactBlockTokens/);
   });
 });

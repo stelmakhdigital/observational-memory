@@ -51,6 +51,7 @@ function makeSession(
     extractor?: (input: WorkerInput) => import('../../src/core/types.js').WorkerResult;
     reflect?: (input: WorkerInput) => import('../../src/core/types.js').WorkerResult;
   } = {},
+  root: string = dir,
 ): { orch: OmOrchestrator; memory: MemoryStore; history: MockHistory; runner: MockRunner; session: OmSession } {
   const history = new MockHistory({ chunkTokens: base.chunkTokens, overlapTokens: 0 });
   const consolidator = {
@@ -94,7 +95,7 @@ function makeSession(
     { result: defaultReflect },
   );
   const session = createOmSession({
-    root: dir,
+    root,
     sessionId: S,
     history,
     runner,
@@ -151,17 +152,25 @@ describe('priority, provenance & injection modes (v0.4/v0.5)', () => {
   });
 
   it('topK injection trims by priority budget; full keeps everything', async () => {
+    // Isolate the two sessions (separate roots): the file ledger is keyed by
+    // <root>/<sessionId> and a shared ledger would leak the first session's
+    // watermark into the second (n9 re-observe loop). tailTokens=30 leaves
+    // 2 chunks before the tail boundary so the topK budget actually trims.
     const mk = async (inject: 'full' | 'topK') => {
-      const h = makeSession({ compaction: { inject, topKBudgetTokens: 12 } }, {
-        observer: (input: WorkerInput) => ({
-          runId: input.runId,
-          ok: true,
-          observations: [
-            draft('routine old fact one', 'routine'),
-            draft('critical must keep', 'critical'),
-          ],
-        }),
-      });
+      const h = makeSession(
+        { compaction: { inject, topKBudgetTokens: 12 }, tailTokens: 30 },
+        {
+          observer: (input: WorkerInput) => ({
+            runId: input.runId,
+            ok: true,
+            observations: [
+              draft('routine old fact one', 'routine'),
+              draft('critical must keep', 'critical'),
+            ],
+          }),
+        },
+        path.join(dir, inject),
+      );
       h.orch.setEnabled(true);
       await feedChunks(h.orch, h.history);
       return h;
@@ -172,7 +181,7 @@ describe('priority, provenance & injection modes (v0.4/v0.5)', () => {
     const topk = await mk('topK');
     const t = topk.orch.compactBlock().observations;
     expect(t).toContain('critical must keep');
-    // budget 12 < 20 (10+10): only the critical survives in every chunk
+    // budget 12 < the two chunks' 4 obs (2× critical fill the budget first)
     expect(t).not.toContain('routine old fact one');
   });
 });

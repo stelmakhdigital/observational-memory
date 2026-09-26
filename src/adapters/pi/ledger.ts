@@ -1,12 +1,14 @@
 /**
  * PiLedgerStore: the core LedgerStore seam backed by pi custom entries
- * (pi.appendEntry + sessionManager.getEntries).
+ * (pi.appendEntry + sessionManager.getBranch).
  *
  * Properties that matter (verified in pi 0.86.1, spike S2):
  * - Custom entries are appended as children of the current leaf and advance
  *   the leaf → branch-local (they stay with their branch under /tree).
  * - Custom entries do NOT participate in the LLM context (display/state only).
- * - Entries survive resume; reading filters the current branch by customType.
+ * - Entries survive resume; the caller feeds `read()` the CURRENT branch
+ *   (getBranch, C1), so it is filtered to that branch by construction and
+ *   further filtered by customType.
  */
 import type {
   LedgerEntryType,

@@ -16,6 +16,16 @@ const oEntry = (o: Observation): TypedLedgerEntry<'om.observation'> => ({
   data: o,
   at: '2025-09-21T00:00:00Z',
 });
+const oEntryRun = (
+  o: Observation,
+  runId: string,
+  sourceRange?: { fromId: string; toId: string },
+): TypedLedgerEntry<'om.observation'> => ({
+  type: 'om.observation',
+  data: sourceRange ? { ...o, sourceRange } : o,
+  at: '2025-09-21T00:00:00Z',
+  meta: { runId },
+});
 const tEntry = (
   ids: string[],
   runId?: string,
@@ -44,6 +54,63 @@ describe('foldPool', () => {
     const pool = foldPool([], []);
     expect(pool.observations).toEqual([]);
     expect(pool.tokens).toBe(0);
+  });
+
+  describe('n9: /tree re-observe supersedes the previous run of the same slice', () => {
+    const slice = { fromId: 'm1', toId: 'm2' };
+
+    it('re-observe of the same slice (same fromId, new run, fresh ids) keeps only the new set', () => {
+      const run1 = [
+        oEntryRun(obs('om-1', 'm2'), 'run-1', slice),
+        oEntryRun(obs('om-2', 'm2'), 'run-1', slice),
+      ];
+      const run2 = [oEntryRun(obs('om-3', 'm2'), 'run-2', slice)];
+      const pool = foldPool([...run1, ...run2], []);
+      expect(pool.observations.map((o) => o.id)).toEqual(['om-3']);
+      expect(pool.tokens).toBe(10);
+    });
+
+    it('same-run siblings (one commit = several observations, same fromId) are not evicted', () => {
+      const pool = foldPool(
+        [
+          oEntryRun(obs('om-1', 'm2'), 'run-1', slice),
+          oEntryRun(obs('om-2', 'm2'), 'run-1', slice),
+          oEntryRun(obs('om-3', 'm2'), 'run-1', slice),
+        ],
+        [],
+      );
+      expect(pool.observations.map((o) => o.id)).toEqual(['om-1', 'om-2', 'om-3']);
+    });
+
+    it('different slices (different fromId) are never evicted', () => {
+      const pool = foldPool(
+        [
+          oEntryRun(obs('om-1', 'm2'), 'run-1', slice),
+          oEntryRun(obs('om-2', 'm4'), 'run-2', { fromId: 'm3', toId: 'm4' }),
+        ],
+        [],
+      );
+      expect(pool.observations.map((o) => o.id)).toEqual(['om-1', 'om-2']);
+    });
+
+    it('supersession composes with tombstones and id-dedupe', () => {
+      const pool = foldPool(
+        [
+          oEntryRun(obs('om-1', 'm2'), 'run-1', slice),
+          oEntryRun(obs('om-3', 'm2'), 'run-2', slice),
+          oEntry(obs('om-3', 'm2')), // id-dedupe still applies
+        ],
+        [tEntry(['om-3'])],
+      );
+      // om-1 superseded, om-3 tombstoned → empty
+      expect(pool.observations).toEqual([]);
+      expect(pool.tombstoned.has('om-3')).toBe(true);
+    });
+
+    it('legacy observations (no sourceRange/runId) keep id-only dedupe', () => {
+      const pool = foldPool([oEntry(obs('om-1', 'm2')), oEntry(obs('om-2', 'm3'))], []);
+      expect(pool.observations.map((o) => o.id)).toEqual(['om-1', 'om-2']);
+    });
   });
 });
 

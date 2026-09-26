@@ -131,6 +131,9 @@ export class PiSubprocessRunner implements ModelRunner {
       '--model', modelFlag(model),
       '--no-extensions',
       '--no-builtin-tools',
+      // Ephemeral run: do NOT persist the worker's own session to
+      // ~/.pi/agent/sessions/<project>/ (every worker would leave a JSONL).
+      '--no-session',
       '-e', this.workerExt,
       '--', prompt,
     ];
@@ -151,7 +154,16 @@ export class PiSubprocessRunner implements ModelRunner {
 
       let proc: ChildProcess;
       try {
-        proc = spawn(this.o.piBinary, args, { cwd: this.o.cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+        // detached:true on POSIX → child becomes the leader of a NEW process
+        // group, so we can SIGKILL the whole tree (grandchildren that hold the
+        // stdio pipes open would otherwise prevent 'close'). stdio pipes are
+        // unaffected.
+        proc = spawn(this.o.piBinary, args, {
+          cwd: this.o.cwd,
+          env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          detached: process.platform !== 'win32',
+        });
       } catch (e) {
         finish({ runId: input.runId, ok: false, error: `spawn failed: ${String(e)}` });
         return;
@@ -164,13 +176,17 @@ export class PiSubprocessRunner implements ModelRunner {
       const timer = setTimeout(() => {
         // Resolve immediately: a hung child may hold stdio open (e.g. a grandchild
         // like `sleep`), so we must not wait for 'close'.
-        try {
-          proc.kill('SIGKILL');
-        } catch {
-          /* already gone */
-        }
+        this.killTree(proc);
+        // Stop accumulating stdout/stderr: a grandchild may keep the pipes open
+        // and streaming data into `stdout`/`stderr` forever.
+        proc.stdout?.removeAllListeners('data');
+        proc.stderr?.removeAllListeners('data');
         finish({ runId: input.runId, ok: false, error: `worker timed out after ${this.o.timeoutMs}ms` });
       }, this.o.timeoutMs ?? 10 * 60 * 1000);
+      // Safe to unref: while the child is alive the loop cannot exit anyway;
+      // if the child dies first, the timer is cleared in 'close'. Unref avoids
+      // the timer alone pinning the pi process for the full timeout.
+      timer.unref();
 
       proc.stdout?.on('data', (d: Buffer) => (stdout += d.toString('utf8')));
       proc.stderr?.on('data', (d: Buffer) => (stderr += d.toString('utf8')));
@@ -180,6 +196,9 @@ export class PiSubprocessRunner implements ModelRunner {
       });
       proc.on('close', (code) => {
         clearTimeout(timer);
+        // Reap any grandchildren left in the worker's process group (they can
+        // outlive the direct child and hold the stdio pipes open).
+        this.killTree(proc);
         const { text, costUsd } = parsePiJsonl(stdout);
         const body = text.trim() || stdout.trim();
         if (code !== 0 && !body) {
@@ -244,16 +263,64 @@ export class PiSubprocessRunner implements ModelRunner {
   }
 
   async drain(): Promise<void> {
+    const debug = this.o.debug ?? (() => {});
     const waiters = [...this.active.values()];
     await Promise.all(
       waiters.map(
         (p) =>
           new Promise<void>((r) => {
-            if (p.exitCode !== null || p.killed) return r();
-            p.once('close', () => r());
-            p.once('error', () => r());
+            // M1 race fix: listeners are registered FIRST, before any state
+            // check — a child can exit between the check and `once('close')`
+            // and the close event would be lost (→ promise never resolves).
+            let resolved = false;
+            let watchdog: NodeJS.Timeout | undefined;
+            const done = () => {
+              if (resolved) return;
+              resolved = true;
+              if (watchdog) clearTimeout(watchdog);
+              r();
+            };
+            p.once('close', done);
+            p.once('error', done);
+            // Already dead before we entered drain — resolve immediately
+            // (the close listener above is harmless: `done` is idempotent).
+            if (p.exitCode !== null || p.killed) done();
+            // Watchdog: no path to an infinite hang. If 'close' never comes
+            // (lost event, unkillable grandchild, …) force-resolve.
+            watchdog = setTimeout(
+              () => {
+                debug(
+                  `[om] drain: watchdog fired for pid=${p.pid ?? '?'} (exitCode=${p.exitCode}, killed=${p.killed}) — forcing resolve`,
+                );
+                done();
+              },
+              Math.min(this.o.timeoutMs ?? 10 * 60 * 1000, 60 * 1000),
+            );
           }),
       ),
     );
+  }
+
+  /**
+   * Kill the worker's entire process group (POSIX: child was spawned with
+   * detached:true → it is the group leader). Grandchildren that outlive the
+   * direct child can hold the stdio pipes open and block 'close'.
+   */
+  private killTree(p: ChildProcess): void {
+    const pid = p.pid;
+    if (pid == null) return;
+    if (process.platform !== 'win32') {
+      try {
+        process.kill(-pid, 'SIGKILL');
+        return;
+      } catch {
+        /* no such group — fall back to the direct child */
+      }
+    }
+    try {
+      p.kill('SIGKILL');
+    } catch {
+      /* already gone */
+    }
   }
 }

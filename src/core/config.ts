@@ -73,14 +73,34 @@ export interface OmConfig {
   poolTargetTokens: number;
   /** Pool size that triggers a consolidation (FR-4.1). */
   consolidateAtPoolTokens: number;
+  /**
+   * Hard cap for the pool (audit M3). Above this, consolidation is forced on
+   * every turn_end. Always ≥ consolidateAtPoolTokens. Default:
+   * 3 × consolidateAtPoolTokens (re-derived in resolveConfig when the user
+   * overrides consolidateAtPoolTokens but not this key).
+   */
+  poolHardCapTokens: number;
   /** Context usage that triggers compaction (FR-3.1). */
   compactAtContextTokens: number;
+  /**
+   * Hard budget in tokens for the observations part of the compaction block
+   * (audit M3); applies to BOTH inject modes — 'full' means "the whole pool,
+   * but never more than this". Default: min(0.4 × compactAtContextTokens,
+   * poolHardCapTokens) — the post-compaction context (block + tail) then stays
+   * below the pre-compaction context (≥ compactAtContextTokens).
+   */
+  maxCompactBlockTokens: number;
   /** Verbatim tail size, snapped to a chunk boundary (FR-3.4). */
   tailTokens: number;
   /** JOURNEY.md pushed size; oldest segments compressed past this (FR-5.2). */
   journeyTargetTokens: number;
   observerConcurrency: number;
   models: {
+    /**
+     * `id: ''` (default) = inherit the HOST model (the model the agent itself
+     * runs on): the pi adapter replaces an empty id with ctx.model at boot.
+     * provider/thinking are still honored when set alongside an empty id.
+     */
     observer: ModelRef;
     consolidator: ModelRef;
     /** Optional; defaults to the consolidator model. */
@@ -110,13 +130,20 @@ export const DEFAULT_CONFIG: OmConfig = {
   chunkOverlapTokens: 0,
   poolTargetTokens: 10000,
   consolidateAtPoolTokens: 20000,
+  // = 3 × consolidateAtPoolTokens (re-derived in resolveConfig, see above)
+  poolHardCapTokens: 60000,
   compactAtContextTokens: 100000,
+  // = min(0.4 × compactAtContextTokens, poolHardCapTokens) (re-derived)
+  maxCompactBlockTokens: 40000,
   tailTokens: 20000,
   journeyTargetTokens: 1000,
   observerConcurrency: 4,
   models: {
-    observer: { id: 'claude-sonnet-4-6', thinking: 'low' },
-    consolidator: { id: 'claude-sonnet-4-6', thinking: 'medium' },
+    // audit n11: '' = inherit the host model. A hardcoded cloud model as
+    // default means every chunk = spawn + provider failure + retry + noise
+    // for users whose provider is not configured.
+    observer: { id: '', thinking: 'low' },
+    consolidator: { id: '', thinking: 'medium' },
   },
   passive: false,
   debugLog: false,
@@ -178,8 +205,16 @@ export function validateConfig(c: OmConfig): void {
   if (!(c.tailTokens > 0)) problems.push('tailTokens must be > 0');
   if (!(c.journeyTargetTokens > 0)) problems.push('journeyTargetTokens must be > 0');
   if (!(c.observerConcurrency >= 1)) problems.push('observerConcurrency must be >= 1');
-  if (!c.models?.observer?.id || !c.models?.consolidator?.id)
-    problems.push('models.observer.id and models.consolidator.id are required');
+  if (!(c.poolHardCapTokens > 0)) problems.push('poolHardCapTokens must be > 0');
+  if (c.poolHardCapTokens < c.consolidateAtPoolTokens)
+    problems.push('poolHardCapTokens must be >= consolidateAtPoolTokens');
+  if (!(c.maxCompactBlockTokens > 0)) problems.push('maxCompactBlockTokens must be > 0');
+  if (!c.models?.observer || !c.models?.consolidator)
+    problems.push('models.observer and models.consolidator are required (id "" = inherit the host model)');
+  for (const [role, ref] of Object.entries(c.models ?? {})) {
+    if (ref && 'id' in ref && typeof ref.id !== 'string')
+      problems.push(`models.${role}.id must be a string`);
+  }
   if (c.gapMarkers.thresholdMs <= 0) problems.push('gapMarkers.thresholdMs must be > 0');
   if (c.earlyActivation.idleMs <= 0) problems.push('earlyActivation.idleMs must be > 0');
   if (c.earlyActivation.minUnobservedTokens <= 0)
@@ -210,7 +245,19 @@ export function validateConfig(c: OmConfig): void {
 
 /** Merge partial user config (global, then project) onto defaults and validate. */
 export function resolveConfig(partial: Partial<OmConfig> | null | undefined): OmConfig {
-  const merged = mergeDeep<OmConfig>(DEFAULT_CONFIG, partial ?? {});
+  const p = (partial ?? {}) as Partial<OmConfig>;
+  const merged = mergeDeep<OmConfig>(DEFAULT_CONFIG, p);
+  // Derived defaults (audit M3): the cap/budget track their related
+  // thresholds when the user overrides the threshold but not the derived key.
+  if (p.poolHardCapTokens === undefined) {
+    merged.poolHardCapTokens = 3 * merged.consolidateAtPoolTokens;
+  }
+  if (p.maxCompactBlockTokens === undefined) {
+    merged.maxCompactBlockTokens = Math.min(
+      Math.floor(merged.compactAtContextTokens * 0.4),
+      merged.poolHardCapTokens,
+    );
+  }
   validateConfig(merged);
   return merged;
 }

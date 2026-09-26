@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -173,5 +174,86 @@ describe('PiSubprocessRunner', () => {
     }).run('observer', { runId: 'r', role: 'observer', chunk: { text: 'x', overlapContext: '', coversUpToId: 'm' } });
     expect(r.ok).toBe(false);
     expect(r.error).toContain('timed out');
+  });
+});
+
+// M1: drain() race tests — `active` is a private map; inject mock children
+// (EventEmitters) directly.
+function mockChild(over: { exitCode?: number | null; killed?: boolean } = {}): any {
+  const ee = new EventEmitter();
+  return Object.assign(ee, { pid: 4242, exitCode: over.exitCode ?? null, killed: over.killed ?? false });
+}
+
+function runnerWithActive(...children: any[]): PiSubprocessRunner {
+  const runner = makeRunner();
+  const active = (runner as unknown as { active: Map<string, any> }).active;
+  children.forEach((c, i) => active.set(`mock-${i}`, c));
+  return runner;
+}
+
+describe('drain (M1 race)', () => {
+  it('resolves for a child that is already dead before drain (close never emitted)', async () => {
+    const runner = runnerWithActive(mockChild({ exitCode: 0, killed: true }));
+    await expect(runner.drain()).resolves.toBeUndefined();
+  });
+
+  it('resolves when the child closes after drain started (race: exit between check and registration)', async () => {
+    // exitCode is null at the moment drain() runs; 'close' is emitted right
+    // after — the close listener must have been registered BEFORE any state
+    // check, otherwise the event is lost and the promise hangs forever.
+    const child = mockChild();
+    const runner = runnerWithActive(child);
+    const p = runner.drain();
+    child.emit('close', 0);
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it('resolves when the child dies via the error event', async () => {
+    const child = mockChild();
+    const runner = runnerWithActive(child);
+    const p = runner.drain();
+    child.emit('error', new Error('boom'));
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it('force-resolves via the watchdog when close never comes (fake timers)', async () => {
+    const child = mockChild(); // alive, nothing ever emitted
+    const runner = runnerWithActive(child);
+    vi.useFakeTimers();
+    try {
+      const p = runner.drain();
+      vi.advanceTimersByTime(15_000 + 1); // makeRunner timeoutMs = 15_000
+      await expect(p).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('watchdog is capped at 60s regardless of timeoutMs', async () => {
+    const child = mockChild();
+    const runner = new PiSubprocessRunner({
+      piBinary: fakePi,
+      cwd: dir,
+      observerModel: { id: 'x' },
+      consolidatorModel: { id: 'x' },
+      timeoutMs: 10 * 60 * 1000, // 10 min — watchdog must cap at 60s
+    });
+    (runner as unknown as { active: Map<string, any> }).active.set('mock', child);
+    vi.useFakeTimers();
+    try {
+      const p = runner.drain();
+      vi.advanceTimersByTime(60 * 1000 + 1);
+      await expect(p).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('resolves for a live child that closes normally (real timers)', async () => {
+    const child = mockChild();
+    const runner = runnerWithActive(child);
+    const p = runner.drain();
+    setTimeout(() => child.emit('close', 0), 20);
+    await expect(p).resolves.toBeUndefined();
   });
 });

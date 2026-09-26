@@ -397,6 +397,18 @@ observational-memory/
   canSkipObserverWait, cutoff-snap, cost «по всем веткам», runs≠cost>0. Рекомендации
   P0/P1/P2 — в `audit.md` (локальный, gitignored). Smoke: `/om:compact` в headless
   не персистится (проверить в TUI). Подробности — audit.md.
+- 2025-09: **Фиксы P0 (аудит 26.09) — все 4 критичных/major-фикса выполнены, 239 тестов, typecheck чисто**:
+  (1) C1: getEntries()→getBranch() во всех 4 местах (history.messages/lastMessageAt, ledger, firstBranchEntryIdAfter)
+  — мёртвые ветки больше не порождают память/контекст; n9: дедуп re-observe по sourceRange.fromId в foldPool
+  (последний run с тем же fromId вытесняет ранние; legacy id-dedupe сохранён). (2) M1: drain() переписан
+  (close-хэндлеры первыми, watchdog min(timeout,60s) — hang невозможен) + killTree (detached + kill -pid),
+  n1 (data-слушатели снимаются), n3 (timer.unref). M2: воркеры с `--no-session` (проверено живьём: 0 мусорных
+  сессий). (3) M3: poolHardCapTokens (60k = 3×consolidateAt, производные дефолты) + maxCompactBlockTokens
+  (40k = min(0.4×compactAt, cap)) — trimToBudget применяется ВСЕГДА (full = «пул, но ≤ бюджета»);
+  invariant-тест «контекст после ≤ до». (4) n11: models.* дефолт = пустая строка = «наследовать модель хоста»
+  (resolveWorkerModel при boot); runs-счётчик: om.cost пишется при каждом воркере (вкл. $0) → status.runs честный.
+  Найден и починен латентный баг теста topK (общий ledger-файл двух сессий).
+  Осталось: M4/M5/M6 (P1), перенос механизмов референса (P1.7), интерактивный smoke авто-компакции (P2.13).
 - 2025-09: **v0.2.0** (тег 3982f98): early activation + fork-seed fix в релизе;
   установка в pi переключена с локального пути на
   `git:github.com/stelmakhdigital/observational-memory@v0.2.0` (settings.json,

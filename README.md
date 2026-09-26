@@ -133,15 +133,23 @@ typebox — peerDependency, поставляется самим pi).
     "chunkOverlapTokens": 0,       // overlap-контекст для связности
     "poolTargetTokens": 10000,     // целевой размер буфера после консолидации
     "consolidateAtPoolTokens": 20000, // порог запуска консолидации
+    "poolHardCapTokens": 60000,     // hard cap пула (по умолч. = 3 × consolidateAtPoolTokens);
+                                    // выше него консолидация форсится на каждом turn_end
     "compactAtContextTokens": 100000, // порог контекста для компакции (тонировать под модель)
+    "maxCompactBlockTokens": 40000,  // max размер наблюдений-части компакционного блока (по
+                                    // умолч. = min(0.4 × compactAtContextTokens, poolHardCapTokens));
+                                    // действует и для "full": «весь пул, но не больше бюджета»
     "tailTokens": 20000,           // verbatim-хвост (снапится на границу чанка)
     "journeyTargetTokens": 1000,   // целевой размер JOURNEY.md
     "observerConcurrency": 4,
     "models": {
-      "observer":     { "id": "claude-sonnet-4-6", "thinking": "low" },
-      "consolidator": { "id": "claude-sonnet-4-6", "thinking": "medium" },
-      "extractor":    { "id": "claude-sonnet-4-6", "thinking": "low" },
-      "reflect":      { "id": "claude-sonnet-4-6", "thinking": "low" } // опц., по умолч. = consolidator
+      // "id": "" (по умолч.) = модель хоста — воркеры работают на той же модели,
+      // что и сам агент (берётся при старте сессии). Явно: { "id": "claude-sonnet-4-6" }
+      // и т.п. (провайдер/thinking по-прежнему поддерживаются):
+      "observer":     { "id": "", "thinking": "low" },
+      "consolidator": { "id": "", "thinking": "medium" },
+      "extractor":    {},            // опц., по умолч. = consolidator
+      "reflect":      {}             // опц., по умолч. = consolidator
     },
     "extractors": [                    // пустой список [] — выключить экстракторы
       { "id": "profile",
@@ -153,7 +161,7 @@ typebox — peerDependency, поставляется самим pi).
         "description": "The CURRENT state of the work..." }
     ],
     "priority": { "enabled": true },   // v0.4: priority-метки наблюдений (P0/P1/P2)
-    "compaction": { "inject": "full", "topKBudgetTokens": 20000 }, // "full" | "topK"
+    "compaction": { "inject": "full", "topKBudgetTokens": 20000 }, // "full" | "topK" (оба режима ограничены maxCompactBlockTokens)
     "reflector": { "enabled": true, "idleMs": 1800000, "minIntervalMs": 21600000 },
     "shared": { "enabled": true },     // v0.4: project-level темы <root>/shared (read-only)
     "attachments": "auto",             // "auto" (плейсхолдеры [image: name]) | "off"
@@ -167,6 +175,14 @@ typebox — peerDependency, поставляется самим pi).
 ```
 
 Переменные окружения: `OM_PI_BIN` (бинарник pi), `OM_WORKER_TIMEOUT_MS` (таймаут воркера).
+
+**Модели воркеров.** По умолчанию (`"id": ""`) все воркеры (observer, consolidator,
+extractor, reflect) работают на **модели хоста** — той же, на которой запущен сам
+агент (берётся при старте сессии). Так OM «из коробки» работает с любым настроенным
+провайдером (включая локальные) без отдельных `models.*`; переключение модели хоста
+посреди сессии воркеров не перенацеливает (они принимают модель из boot-момент). Если
+модель хоста недоступна и явная модель не задана — OM пишет понятную ошибку
+(установите `observational-memory.models.<роль>`).
 
 ### MCP-сервер (любой MCP-клиент, v0.4)
 

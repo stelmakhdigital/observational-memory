@@ -29,6 +29,12 @@ describe('loadPiAdapterConfig', () => {
     expect(c.piBinary).toBe('pi');
     expect(c.workerTimeoutMs).toBe(600_000);
     expect(c.memoryDir).toBe(path.join(cwd, '.memory'));
+    // n11: worker models default to '' (inherit the host model, resolved in the adapter)
+    expect(c.om.models.observer.id).toBe('');
+    expect(c.om.models.consolidator.id).toBe('');
+    // M3: derived defaults
+    expect(c.om.poolHardCapTokens).toBe(3 * c.om.consolidateAtPoolTokens);
+    expect(c.om.maxCompactBlockTokens).toBe(Math.min(0.4 * c.om.compactAtContextTokens, c.om.poolHardCapTokens));
   });
 
   it('merges global then project (project wins)', () => {

@@ -348,7 +348,17 @@ export class OmOrchestrator {
   private maybeConsolidate(): void {
     if (this.consolidating) return;
     const pool = this.pool();
-    if (pool.tokens <= this.cfg.consolidateAtPoolTokens) return;
+    // audit M3: above the hard cap the consolidator is FORCED on every
+    // turn_end (not just at the regular threshold). The real protection
+    // against a permanently failing consolidator is the compaction-block
+    // budget in compactionPlan — the pool may stay big, the context won't.
+    const overCap = pool.tokens > this.cfg.poolHardCapTokens;
+    if (pool.tokens <= this.cfg.consolidateAtPoolTokens && !overCap) return;
+    if (overCap) {
+      this.log(
+        `pool (${pool.tokens} tokens) above hard cap (${this.cfg.poolHardCapTokens}) — forcing consolidation`,
+      );
+    }
     this.consolidating = true;
     const oldest = oldestAbove(pool, this.cfg.poolTargetTokens);
     const runId = newRunId();
@@ -638,9 +648,15 @@ export class OmOrchestrator {
     const tailBoundaryId = this.d.history.tailStartIdFor?.(this.cfg.tailTokens) ?? prog.coversUpToId;
     let observations = selectBeforeTail(pool.observations, tailBoundaryId);
     // v0.5: deterministic injection modes — topK trims by priority budget.
-    if (this.cfg.compaction.inject === 'topK') {
-      observations = trimToBudget(observations, this.cfg.compaction.topKBudgetTokens);
-    }
+    // audit M3: the observations part of the block is ALWAYS capped — for
+    // topK the smaller of the two budgets wins, and 'full' means "the whole
+    // pool, but never more than maxCompactBlockTokens" (class/freshness
+    // selection is the same trimToBudget as topK).
+    const budget = Math.min(
+      this.cfg.maxCompactBlockTokens,
+      this.cfg.compaction.inject === 'topK' ? this.cfg.compaction.topKBudgetTokens : Number.POSITIVE_INFINITY,
+    );
+    observations = trimToBudget(observations, budget);
     // v0.4: render priority-ordered (critical → important → routine).
     observations = orderByPriority(observations);
     const memoryMap = renderMemoryMap(this.d.memory.listTopics(this.sessionId));
@@ -756,10 +772,14 @@ export class OmOrchestrator {
       at,
       meta: { runId },
     });
-    if (status === 'ok' && costUsd && costUsd > 0) {
+    // Runs counter (audit, smoke-bug #2): EVERY successful worker run leaves
+    // an om.cost mark — even at $0 (free/local models previously showed
+    // "(0 runs)"). The cost sum is unaffected (0 + 0 = 0).
+    if (status === 'ok') {
+      const usd = typeof costUsd === 'number' && Number.isFinite(costUsd) && costUsd > 0 ? costUsd : 0;
       this.d.ledger.append({
         type: 'om.cost',
-        data: { runId, role, usd: costUsd, at },
+        data: { runId, role, usd, at },
         at,
         meta: { runId },
       });

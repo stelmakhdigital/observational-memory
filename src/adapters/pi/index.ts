@@ -25,7 +25,8 @@ import {
   type WorkerResult,
 } from '../../core/index.js';
 import { loadPiAdapterConfig, type PiAdapterConfig } from './config.js';
-import { PiHistorySource } from './history.js';
+import type { ModelRef } from '../../core/config.js';
+import { firstBranchEntryIdAfter, PiHistorySource } from './history.js';
 import { PiLedgerStore, OM_CUSTOM_TYPE } from './ledger.js';
 import { PiSubprocessRunner } from './runner.js';
 import type {
@@ -33,7 +34,6 @@ import type {
   PiCommandContext,
   PiCompactPreparation,
   PiContext,
-  PiEntry,
 } from './types.js';
 
 interface Runtime {
@@ -52,6 +52,40 @@ export default function observationalMemory(pi: PiApi): OmExtension {
 
   const debug = (m: string) => {
     if (rt?.config.om.debugLog) console.error(`[om] ${m}`);
+  };
+
+  /**
+   * n11: an empty worker model id means "inherit the host model" (the model
+   * the agent itself runs on). The runner takes static ModelRefs at boot, so
+   * the host model is resolved here (ctx.model at boot; mid-session model
+   * switches do not re-target already-built workers). Explicit ids pass
+   * through untouched; explicit provider/thinking are honored alongside an
+   * inherited id.
+   */
+  const resolveWorkerModel = (
+    ref: ModelRef | undefined,
+    role: string,
+    ctx: PiContext,
+    fallback?: ModelRef,
+  ): ModelRef => {
+    // extractor/reflect default to the consolidator model (runner semantics).
+    const r = ref ?? fallback;
+    if (r && r.id) return r;
+    if (ctx.model) {
+      return {
+        provider: r?.provider ?? ctx.model.provider,
+        id: ctx.model.id,
+        ...(r?.thinking ? { thinking: r.thinking } : {}),
+      };
+    }
+    // Host model unknown too: fail loudly (a clearly-named id makes the
+    // subprocess error obvious instead of a cryptic spawn failure).
+    const msg =
+      `worker "${role}" has no model configured (models.${role}.id) and the host model is unknown — ` +
+      `worker runs will fail; set "observational-memory".models.${role} in settings`;
+    console.error(`[om] ${msg}`);
+    if (ctx.hasUI) ctx.ui.notify(`OM: ${msg}`, 'error');
+    return { ...(r ?? {}), id: 'om-unconfigured-model' };
   };
 
   const sink: EventSink = {
@@ -113,15 +147,19 @@ export default function observationalMemory(pi: PiApi): OmExtension {
     );
     const ledger = new PiLedgerStore(
       (data) => pi.appendEntry(OM_CUSTOM_TYPE, data),
-      () => ctx.sessionManager.getEntries(),
+      // C1: current branch only — om.* custom entries are branch-local
+      // (children of the leaf), so the branch contains exactly the ledger
+      // of the current /tree branch.
+      () => ctx.sessionManager.getBranch(),
     );
+    const consolidatorModel = resolveWorkerModel(config.om.models.consolidator, 'consolidator', ctx);
     const runner = new PiSubprocessRunner({
       piBinary: config.piBinary,
       cwd: ctx.cwd,
-      observerModel: config.om.models.observer,
-      consolidatorModel: config.om.models.consolidator,
-      extractorModel: config.om.models.extractor,
-      reflectModel: config.om.models.reflect,
+      observerModel: resolveWorkerModel(config.om.models.observer, 'observer', ctx),
+      consolidatorModel,
+      extractorModel: resolveWorkerModel(config.om.models.extractor, 'extractor', ctx, consolidatorModel),
+      reflectModel: resolveWorkerModel(config.om.models.reflect, 'reflect', ctx, consolidatorModel),
       sessionLabel: path.basename(ctx.cwd),
       journeyTargetTokens: config.om.journeyTargetTokens,
       priorityEnabled: config.om.priority.enabled,
@@ -152,13 +190,9 @@ export default function observationalMemory(pi: PiApi): OmExtension {
   };
 
   // Id of the first entry AFTER the tail boundary (firstKeptEntryId).
-  const firstEntryIdAfter = (ctx: PiContext, boundary: string, fallback: string): string => {
-    if (boundary === '') return fallback;
-    const entries: PiEntry[] = ctx.sessionManager.getEntries();
-    const idx = entries.findIndex((e) => e.id === boundary);
-    if (idx === -1) return fallback;
-    return entries[idx + 1]?.id ?? fallback;
-  };
+  // C1: resolved within the current branch (getBranch), never across branches.
+  const firstEntryIdAfter = (ctx: PiContext, boundary: string, fallback: string): string =>
+    firstBranchEntryIdAfter(ctx.sessionManager, boundary, fallback);
 
   pi.on('session_start', (_e, ctx) => {
     track(ctx);

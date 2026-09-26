@@ -15,6 +15,25 @@ import type { HistorySource, Watermark } from '../../core/types.js';
 import type { PiContext, PiEntry, PiSessionManager } from './types.js';
 
 /**
+ * Id of the first entry AFTER `boundary` within the CURRENT branch only
+ * (C1: getEntries() spans all branches and would pick a successor from a
+ * dead branch). getBranch() walks leaf→root and reverses, so the successor
+ * is the next element. Returns `fallback` when the boundary is not on the
+ * branch or is its last entry.
+ */
+export function firstBranchEntryIdAfter(
+  sessionManager: PiSessionManager,
+  boundary: string,
+  fallback: string,
+): string {
+  if (boundary === '') return fallback;
+  const branch: PiEntry[] = sessionManager.getBranch();
+  const idx = branch.findIndex((e) => e.id === boundary);
+  if (idx === -1) return fallback;
+  return branch[idx + 1]?.id ?? fallback;
+}
+
+/**
  * Extract a readable text from a pi message (AgentMessage-like).
  * opts.attachments (v0.7): 'auto' (default) renders non-text parts as named
  * placeholders; 'off' omits them. Unknown shapes degrade to a compact JSON
@@ -90,7 +109,7 @@ export class PiHistorySource implements HistorySource {
 
   /** Current branch as OmMessage[] (ascending, entry ids preserved). */
   messages(): OmMessage[] {
-    const entries = this.sessionManager().getEntries();
+    const entries = this.sessionManager().getBranch();
     const out: OmMessage[] = [];
     for (const e of entries) {
       if (e.type !== 'message' || !e.message) continue;
@@ -164,7 +183,7 @@ export class PiHistorySource implements HistorySource {
   }
 
   lastMessageAt(): Date | null {
-    const entries = this.sessionManager().getEntries();
+    const entries = this.sessionManager().getBranch();
     for (let i = entries.length - 1; i >= 0; i--) {
       const e = entries[i];
       if (e?.type === 'message') return new Date(e.timestamp);
