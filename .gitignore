@@ -3,3 +3,4 @@ dist/
 .memory/
 *.log
 eval/report.json
+audit.md

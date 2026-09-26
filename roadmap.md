@@ -132,3 +132,4 @@
 | 2025-09 | 7f8d858 | roadmap: proposed backlog v0.4+ (4 фазы из разведки) |
 | 2025-09 | — | v0.4 feature wave (1/2-фаза): priority-метки, current-task, includePrevious, supersede; recall (тул om_recall + /om:recall + BM25-lite + since/until), provenance sourceRange, topK-инжекция (209 тестов) |
 | 2025-09 | — | v0.4 feature wave (3/4-фаза): anti-poisoning sanitize, crash-lock FileLedgerStore, reflector (sleep-time), shared memory + seed-from force, attachments, MCP-сервер, self-eval harness; docs (README/ARCHITECTURE §10) — Release v0.4.0 |
+| 2026-09 | — | Аудит 26.09: live smoke (qwen3.8-27b-fp8, 0 крашей) + код-ревью (1 critical C1: getEntries vs getBranch; 6 major) + аудит референса (MIT, перенять: auto-resume/skip-wait/snap); результаты в audit.md (gitignored); .gitignore + PROJECT_MEMORY синхронизированы |

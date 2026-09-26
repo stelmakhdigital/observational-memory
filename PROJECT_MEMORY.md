@@ -387,6 +387,16 @@ observational-memory/
   пропусcalся); seedFrom → boolean; (b) quiescent shutdown/compaction: follow-up
   воркеры (post-consolidation extraction) дожидаются (inFlight-записи удаляются
   при завершении, trackTask). 165 passed.
+- 2025-09: **АУДИТ (26.09)** — полная проверка: typecheck OK, 209/209 тестов, live smoke
+  в pi 0.87.1 (qwen3.8-27b-fp8) — пайплайн рабочий (29 obs, консолидации, supersede,
+  extractors, recall, reflector; 0 крашей). Код-ревью: **1 критичный** (C1: getEntries()
+  вместо getBranch() — порожение памяти при /tree) + 6 major (M1 drain-race hang, M2
+  мусорные worker-сессии, M3 без hard cap пула, M4 FileLedgerStore lock, M5 MCP не видит
+  pi-ledger, M6 dups при retry) + 11 minor. Референс amosblomqvist (MIT, замер 25.08):
+  мы функционально богаче; перенять: auto-resume после mid-run компакции,
+  canSkipObserverWait, cutoff-snap, cost «по всем веткам», runs≠cost>0. Рекомендации
+  P0/P1/P2 — в `audit.md` (локальный, gitignored). Smoke: `/om:compact` в headless
+  не персистится (проверить в TUI). Подробности — audit.md.
 - 2025-09: **v0.2.0** (тег 3982f98): early activation + fork-seed fix в релизе;
   установка в pi переключена с локального пути на
   `git:github.com/stelmakhdigital/observational-memory@v0.2.0` (settings.json,
