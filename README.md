@@ -89,7 +89,8 @@ pi -e /абсолютный/путь/к/observational-memory                    
 pi remove git:github.com/stelmakhdigital/observational-memory          # удалить
 ```
 
-pi клонирует репозиторий и запускает `npm install` в клоне (runtime-зависимостей нет;
+pi клонирует репозиторий и запускает `npm install` в клоне (typescript/@types/node
+в dependencies — `prepare` → `npm run build` работает и под `npm install --omit=dev`;
 typebox — peerDependency, поставляется самим pi).
 
 Альтернатива (ручная, без установки пакета): в `~/.pi/agent/settings.json`:

@@ -23,8 +23,8 @@ describe('pi package packaging (git install)', () => {
     expect(pkg.dependencies?.typebox).toBeUndefined();
   });
 
-  it('has no other runtime dependencies (git install runs plain npm install, offline-safe)', () => {
-    expect(Object.keys(pkg.dependencies ?? {})).toEqual([]);
+  it('only build-time tooling in dependencies (prepare/build needs tsc + node types under npm install --omit=dev)', () => {
+    expect(Object.keys(pkg.dependencies ?? {}).sort()).toEqual(['@types/node', 'typescript']);
   });
 });
 

@@ -445,6 +445,17 @@ observational-memory/
   289 тестов (31 файл), typecheck чисто. Ручные P2.13/15 (TUI-smoke авто-компакции, gap-markers/
   reflect живьём) — пользователю (в audit.md). Release **v0.5.0**: P0+P1+P2 волна фиксов
   (критичный C1 ветвление, 6 major, 4 механизма референса, packaging).
+- 2026-09: **Fix install → v0.5.1 (тег не поставлен — пользователь поставит)**:
+  `pi install git:...@v0.5.0` падал: pi ставит через `npm install --omit=dev` →
+  devDependencies не ставятся → `prepare` → `tsc: not found` (exit 127). Фикс:
+  typescript + @types/node (tsconfig `"types": ["node"]`) → dependencies; typebox
+  убран из devDependencies (был peer+dev: npm считал peer выполненным devDep и
+  при --omit=dev не ставил → tsc не находил типы typebox; как чистый peer "*"
+  авто-ставится npm 7+ и в prod-режиме). Live-проверено: (a) npm pack →
+  чистая папка `npm install <tarball> --omit=dev` → import /core OK;
+  (b) git clone → `npm install --omit=dev` → prepare → tsc → dist, import OK.
+  packaging.test.ts: инвариант «dependencies пуст» заменён на
+  «dependencies = ровно [@types/node, typescript]». 289 тестов, typecheck чисто.
 - 2025-09: **v0.2.0** (тег 3982f98): early activation + fork-seed fix в релизе;
   установка в pi переключена с локального пути на
   `git:github.com/stelmakhdigital/observational-memory@v0.2.0` (settings.json,

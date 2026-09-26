@@ -137,3 +137,4 @@
 | 2026-09 | — | Фиксы P1: M5 MCP читает pi-session JSONL; M6 retry только коммита; n10 pickReportBody; n4 realpath/symlink; n5 grep-лимиты; порт референса: auto-resume, canSkipObserverWait, cutoff-snap (закрыта дыра), JOURNEY; 278 тестов |
 | 2026-09 | — | Фиксы P2: M4 FileLedgerStore O_EXCL-lock + O_APPEND/fsync + crash-repair (onRepair); n6 in-memory индекс; packaging exports→dist + prepare-build (consumer-проверено); README-дефолты синхрон; 289 тестов |
 | 2026-09 | — | Release v0.5.0: version bump + тег v0.5.0 (P0+P1+P2 волна фиксов по аудиту 26.09) |
+| 2026-09 | — | Fix install: typescript+@types/node → dependencies, typebox убран из devDeps (peer авто-ставится npm), version 0.5.1 — prepare/build работает под npm install --omit=dev (pi git-install падал: tsc not found); live-проверено: tarball-install и git-clone+install --omit=dev; 289 тестов |
