@@ -200,7 +200,7 @@ export default function observationalMemory(pi: PiApi): OmExtension {
             } catch (error) {
               const msg = error instanceof Error ? error.message : String(error);
               notifyUi(ctx, `OM: resume after compaction failed — ${msg}`, 'error');
-              else debug(`resume failed: ${msg}`);
+              debug(`resume failed: ${msg}`);
             }
           },
         });
