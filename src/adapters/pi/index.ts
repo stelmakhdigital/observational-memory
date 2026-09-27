@@ -138,15 +138,29 @@ export default function observationalMemory(pi: PiApi): OmExtension {
     return { ...(r ?? {}), id: 'om-unconfigured-model' };
   };
 
+  // Decorative footer status; guarded because some pi modes/versions provide
+  // a ui object without setStatus (seen in TUI: boot-ctx ui predates the TUI
+  // ui object). A missing method must never break the pipeline.
+  let statusApiWarned = false;
+  const setUiStatus = (ctx: PiContext, text: string | undefined) => {
+    const fn = (ctx.ui as { setStatus?: unknown } | undefined)?.setStatus;
+    if (typeof fn === 'function') {
+      (fn as (key: string, text: string | undefined) => void).call(ctx.ui, 'om', text);
+    } else if (!statusApiWarned) {
+      statusApiWarned = true;
+      debug('ui.setStatus unavailable in this pi mode/version — status line disabled');
+    }
+  };
+
   const sink: EventSink = {
     onStatus(s: OmStatus) {
       const ctx = rt?.lastCtx;
       if (!ctx) return;
       if (!s.enabled) {
-        ctx.ui.setStatus('om', undefined);
+        setUiStatus(ctx, undefined);
         return;
       }
-      ctx.ui.setStatus('om', `OM ${s.activeObservations} obs · $${s.costUsd.toFixed(3)}`);
+      setUiStatus(ctx, `OM ${s.activeObservations} obs · $${s.costUsd.toFixed(3)}`);
     },
     onCompactionBlock(_b, info) {
       // The actual block is rendered inside session_before_compact (fresh
@@ -305,7 +319,7 @@ export default function observationalMemory(pi: PiApi): OmExtension {
     const r = rt;
     if (!r) return;
     await r.orch.shutdown();
-    r.lastCtx?.ui.setStatus('om', undefined);
+    r.lastCtx && setUiStatus(r.lastCtx, undefined);
   });
 
   // ---- commands (FR-7.1) ------------------------------------------------
