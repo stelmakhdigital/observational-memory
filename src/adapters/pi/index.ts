@@ -149,9 +149,10 @@ export default function observationalMemory(pi: PiApi): OmExtension {
   const diagUi = (ctx: PiContext, missing: string) => {
     if (uiDiagLogged) return;
     uiDiagLogged = true;
-    const ui = ctx.ui as Record<string, unknown> | undefined;
+    const ui = ctx.ui as unknown as Record<string, unknown> | undefined;
+    const mode = (ctx as { mode?: string }).mode;
     console.error(
-      `[om] ui anomaly: missing ${missing}; mode=${ctx.mode ?? 'unknown'} ` +
+      `[om] ui anomaly: missing ${missing}; mode=${mode ?? 'unknown'} ` +
       `uiKeys=[${ui ? Object.keys(ui).join(',') : String(ui)}] hasUI=${ctx.hasUI}`,
     );
   };
