@@ -70,4 +70,14 @@ describe('ui without setStatus (TUI boot-ctx regression)', () => {
     await env.commands.get('om')!.handler('on', env.ctx);
     await expect(env.handlers.get('session_shutdown')!(undefined, env.ctx)).resolves.toBeUndefined();
   });
+
+  it('hasUI=true with a degraded ui (no notify/setStatus) does not throw', async () => {
+    const env = makeEnv();
+    // Live TUI shape: hasUI is true, but the ui object lacks the methods.
+    (env.ctx as { hasUI: boolean }).hasUI = true;
+    (env.ctx as { ui: unknown }).ui = {};
+    await env.handlers.get('session_start')!(undefined, env.ctx);
+    await expect(env.commands.get('om')!.handler('on', env.ctx)).resolves.toBeUndefined();
+    await expect(env.commands.get('om:status')!.handler('', env.ctx)).resolves.toBeUndefined();
+  });
 });

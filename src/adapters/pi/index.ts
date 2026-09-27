@@ -134,22 +134,37 @@ export default function observationalMemory(pi: PiApi): OmExtension {
       `worker "${role}" has no model configured (models.${role}.id) and the host model is unknown — ` +
       `worker runs will fail; set "observational-memory".models.${role} in settings`;
     console.error(`[om] ${msg}`);
-    if (ctx.hasUI) ctx.ui.notify(`OM: ${msg}`, 'error');
+    notifyUi(ctx, `OM: ${msg}`, 'error');
     return { ...(r ?? {}), id: 'om-unconfigured-model' };
   };
 
   // Decorative footer status; guarded because some pi modes/versions provide
   // a ui object without setStatus (seen in TUI: boot-ctx ui predates the TUI
   // ui object). A missing method must never break the pipeline.
-  let statusApiWarned = false;
+  // UI calls are guarded: in some pi modes/versions the ctx.ui object lacks
+  // methods even when hasUI is true (observed live in TUI: notify/setStatus
+  // missing). A decorative UI call must never break the pipeline; on the
+  // first anomaly we dump the actual ui shape to stderr for diagnosis.
+  let uiDiagLogged = false;
+  const diagUi = (ctx: PiContext, missing: string) => {
+    if (uiDiagLogged) return;
+    uiDiagLogged = true;
+    const ui = ctx.ui as Record<string, unknown> | undefined;
+    console.error(
+      `[om] ui anomaly: missing ${missing}; mode=${ctx.mode ?? 'unknown'} ` +
+      `uiKeys=[${ui ? Object.keys(ui).join(',') : String(ui)}] hasUI=${ctx.hasUI}`,
+    );
+  };
+  const notifyUi = (ctx: PiContext, message: string, type: 'info' | 'warning' | 'error') => {
+    const fn = (ctx.ui as { notify?: unknown } | undefined)?.notify;
+    if (typeof fn === 'function') (fn as (m: string, t?: string) => void).call(ctx.ui, message, type);
+    else diagUi(ctx, 'notify');
+  };
   const setUiStatus = (ctx: PiContext, text: string | undefined) => {
     const fn = (ctx.ui as { setStatus?: unknown } | undefined)?.setStatus;
     if (typeof fn === 'function') {
       (fn as (key: string, text: string | undefined) => void).call(ctx.ui, 'om', text);
-    } else if (!statusApiWarned) {
-      statusApiWarned = true;
-      debug('ui.setStatus unavailable in this pi mode/version — status line disabled');
-    }
+    } else diagUi(ctx, 'setStatus');
   };
 
   const sink: EventSink = {
@@ -184,7 +199,7 @@ export default function observationalMemory(pi: PiApi): OmExtension {
               debug('resume message sent after auto-compaction');
             } catch (error) {
               const msg = error instanceof Error ? error.message : String(error);
-              if (ctx.hasUI) ctx.ui.notify(`OM: resume after compaction failed — ${msg}`, 'error');
+              notifyUi(ctx, `OM: resume after compaction failed — ${msg}`, 'error');
               else debug(`resume failed: ${msg}`);
             }
           },
@@ -198,7 +213,7 @@ export default function observationalMemory(pi: PiApi): OmExtension {
       debug(`run ${r.runId} finished ok=${w.ok}${w.costUsd ? ` cost=$${w.costUsd}` : ''}`);
     },
     onError(e) {
-      rt?.lastCtx?.ui.notify(`OM: ${e.message}`, 'error');
+      rt?.lastCtx && notifyUi(rt.lastCtx, `OM: ${e.message}`, 'error');
       debug(`error: ${e.message}`);
     },
     onGapMarker(g) {
@@ -326,7 +341,7 @@ export default function observationalMemory(pi: PiApi): OmExtension {
 
   const report = (ctx: PiCommandContext, lines: string[]) => {
     const out = lines.join('\n');
-    if (ctx.hasUI) for (const l of lines) ctx.ui.notify(l, 'info');
+    if (ctx.hasUI) for (const l of lines) notifyUi(ctx, l, 'info');
     else console.log(out);
   };
 
