@@ -456,6 +456,15 @@ observational-memory/
   (b) git clone → `npm install --omit=dev` → prepare → tsc → dist, import OK.
   packaging.test.ts: инвариант «dependencies пуст» заменён на
   «dependencies = ровно [@types/node, typescript]». 289 тестов, typecheck чисто.
+- 2025-09: **Live smoke v0.5.1 пройден (27.09, pi 0.87.1, qwen3.8-27b-fp8, ~/om-smoke-v051)** — 13/13: пайплайн
+  (30 obs с priority/sourceRange, консолидация → 2 topic + JOURNEY без «end of session», extractors,
+  recall по всем слоям, reflect), **M2 подтверждён (0 worker-сессий)**, runs-счётчик честный
+  (8–9 runs при $0), дефолт-модель = хост работает, resume по id (gate/pool не сбросились),
+  изоляция сессий, 0 крашей. Находки: (1) **auto-compact не сработал в print-режиме** — вероятно
+  isIdle()=false на agent_end в headless (нет диагностического логга — добавить; подтвердить в TUI);
+  (2) сессия только из slash-команд не персистится в print-режиме (workaround: /om on в том же run
+  что первая задача); (3) compact-персист в headless не работает (known). Осталось вручную: /tree
+  ветвление, auto-compact+auto-resume в TUI, gap-markers/reflect-штатный режим (паузы ≥10 мин).
 - 2025-09: **v0.2.0** (тег 3982f98): early activation + fork-seed fix в релизе;
   установка в pi переключена с локального пути на
   `git:github.com/stelmakhdigital/observational-memory@v0.2.0` (settings.json,

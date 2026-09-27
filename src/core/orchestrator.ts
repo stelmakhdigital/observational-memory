@@ -267,6 +267,8 @@ export class OmOrchestrator {
         this.compactedForTokens = tokens;
         this.pendingResume = this.cfg.resumeAfterMidRunCompaction && this.lastRunUnfinished;
         await this.runCompaction();
+      } else {
+        this.log(`auto-compaction skipped: not idle at agent_end (tokens ${tokens})`);
       }
     }
   }
