@@ -324,4 +324,73 @@ describe('drain (M1 race)', () => {
     setTimeout(() => child.emit('close', 0), 20);
     await expect(p).resolves.toBeUndefined();
   });
+
+  // A4: the watchdog must KILL the worker's process group before it
+  // force-resolves (a detached worker would otherwise keep burning the LLM
+  // call after pi moved on), and its timer must be unref'ed.
+  describe('drain watchdog (A4)', () => {
+    interface CapturedTimer {
+      cb: () => void;
+      unref: ReturnType<typeof vi.fn>;
+    }
+    // Stub setTimeout to capture the watchdog callback (no fake timers:
+    // we fire it manually and inspect the returned timer object). The
+    // getter must be called AFTER drain() (the timer is created there).
+    const armWatchdog = (): { timer: () => CapturedTimer } => {
+      let captured: CapturedTimer | undefined;
+      vi.stubGlobal('setTimeout', (fn: () => void, _ms?: number) => {
+        captured = { cb: fn, unref: vi.fn() };
+        return captured as unknown as NodeJS.Timeout;
+      });
+      return {
+        timer: () => {
+          expect(captured).toBeDefined();
+          return captured!;
+        },
+      };
+    };
+
+    it('kills the process group (process.kill(-pid, SIGKILL)), unrefs, and still resolves', async () => {
+      const child = mockChild(); // alive, nothing ever emitted
+      child.kill = vi.fn();
+      const runner = runnerWithActive(child);
+      const killSpy = vi.spyOn(process as unknown as { kill: (...args: unknown[]) => unknown }, 'kill').mockReturnValue(true);
+      const { timer } = armWatchdog();
+      try {
+        const p = runner.drain();
+        timer().cb(); // watchdog fires
+        await expect(p).resolves.toBeUndefined();
+        // Assert INSIDE try: mockRestore() in finally resets call records.
+        expect(killSpy).toHaveBeenCalledWith(-4242, 'SIGKILL');
+        expect(timer().unref).toHaveBeenCalled();
+      } finally {
+        killSpy.mockRestore();
+        vi.unstubAllGlobals();
+      }
+      expect(child.kill).not.toHaveBeenCalled(); // group kill succeeded
+    });
+
+    it('falls back to the direct child when the group is already gone (ESRCH)', async () => {
+      const child = mockChild();
+      child.kill = vi.fn();
+      const runner = runnerWithActive(child);
+      const killSpy = vi
+        .spyOn(process as unknown as { kill: (...args: unknown[]) => unknown }, 'kill')
+        .mockImplementation((pid: unknown) => {
+          if (typeof pid === 'number' && pid < 0) throw new Error('ESRCH');
+          return true;
+        });
+      const { timer } = armWatchdog();
+      try {
+        const p = runner.drain();
+        timer().cb();
+        await expect(p).resolves.toBeUndefined();
+        expect(timer().unref).toHaveBeenCalled();
+      } finally {
+        killSpy.mockRestore();
+        vi.unstubAllGlobals();
+      }
+      if (process.platform !== 'win32') expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+    });
+  });
 });

@@ -318,12 +318,22 @@ export class PiSubprocessRunner implements ModelRunner {
             watchdog = setTimeout(
               () => {
                 debug(
-                  `[om] drain: watchdog fired for pid=${p.pid ?? '?'} (exitCode=${p.exitCode}, killed=${p.killed}) — forcing resolve`,
+                  `[om] drain: watchdog fired for pid=${p.pid ?? '?'} (exitCode=${p.exitCode}, killed=${p.killed}) — killing tree and forcing resolve`,
                 );
+                // A4: the worker was spawned detached (its own process group)
+                // — without a kill, pi would finish the LLM call after we
+                // throw the result away (money burned, "worker ghost").
+                // killTree is safe on an already-dead process (ESRCH →
+                // direct-child kill, both wrapped).
+                this.killTree(p);
                 done();
               },
               Math.min(this.o.timeoutMs ?? 10 * 60 * 1000, 60 * 1000),
             );
+            // Safe to unref: a live child keeps the event loop alive on its
+            // own (same rationale as the run() timeout timer, n3); the
+            // watchdog alone must not pin the pi process.
+            watchdog.unref();
           }),
       ),
     );

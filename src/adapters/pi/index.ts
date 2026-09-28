@@ -336,6 +336,14 @@ export default function observationalMemory(pi: PiApi): OmExtension {
     if (!r) return;
     await r.orch.shutdown();
     r.lastCtx && setUiStatus(r.lastCtx, undefined);
+    // A1: pi 0.87.1 sends session_shutdown (reason 'new' | 'resume' | 'fork')
+    // when /new or /resume switches sessions WITHIN the same process. Drop
+    // the old Runtime so the next session_start/track() boots a fresh
+    // orchestrator/ledger/memory for the new session (worker models and cwd
+    // are re-resolved there). Guarded: if a new Runtime was already booted
+    // meanwhile we must not null it. Double-shutdown is a no-op (rt is null).
+    if (rt === r) rt = null;
+    r.lastCtx = null;
   });
 
   // ---- commands (FR-7.1) ------------------------------------------------
