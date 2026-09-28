@@ -146,3 +146,7 @@
 | 2026-09 | bef98dc | Волна 1 (refactoring-analysis): MCP — tail-read (A2), сверка session-id через OM_MCP_SESSION (A3), short-read цикл (A14) |
 | 2026-09 | cbe2c9d | Волна 1: pi-адаптер — сброс Runtime при замене сессии /new//resume (A1), drain-watchdog killTree+unref (A4) |
 | 2026-09 | 9649d17 | Волна 1: core — chunker overlap (R1), финальный pump наблюдений при graceful stop (E1), gap-markers по реальной паузе (R2); 313 тестов |
+| 2026-09 | 713a9a0 | docs: commit journal v0.5.2–v0.5.4 + Волна 1 |
+| 2026-09 | a10d060 | Волна 2 (mcp): notifications без ответа + ping (A11), один ledger.read в om_status (A16) |
+| 2026-09 | 72765ca | Волна 2 (pi): settings whitelist fail-loudly (A6), timeout-listener release (A8), stdout/stderr капы (A9), tail-first indexAfter (A13), readCapped (A15); 329 тестов |
+| 2026-09 | 1ef29b1 | Волна 2 (core): idempotent commit-retry (R3), sumCosts unknown role (R6), invalid since/until (R7), seed-after-success (R8), gap-dedup persist (R9), async compact-drain (A5), /om:recall validation (A12); 346 тестов |
