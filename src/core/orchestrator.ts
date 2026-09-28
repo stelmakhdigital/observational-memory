@@ -9,7 +9,7 @@
  * Failures never break the master session (NFR-1): one retry, then the error
  * is recorded (om.lastError) and visible in status.
  */
-import { foldPool, oldestAbove, orderByPriority, trimToBudget } from './ledger/pool.js';
+import { foldPool, oldestAbove, trimToBudget } from './ledger/pool.js';
 import { progressOf } from './ledger/progress.js';
 import { renderCompactionBlock, selectBeforeTail } from './ledger/render.js';
 import { renderMemoryMap } from './memory-store.js';
@@ -800,8 +800,7 @@ export class OmOrchestrator {
     // same cap as an explicit selection budget (class/freshness selection is
     // the same trimToBudget).
     observations = trimToBudget(observations, this.cfg.maxCompactBlockTokens);
-    // v0.4: render priority-ordered (critical → important → routine).
-    observations = orderByPriority(observations);
+    // trimToBudget returns priority-ordered (critical → important → routine).
     const memoryMap = renderMemoryMap(this.d.memory.listTopics(this.sessionId));
     const journey = this.d.memory.readJourney(this.sessionId);
     const verbatimTail = this.d.history.tailVerbatim(tailBoundaryId, this.cfg.tailTokens);
