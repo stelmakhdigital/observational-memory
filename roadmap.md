@@ -157,3 +157,7 @@
 | 2026-09 | 6edcfde | Волна 5 (docs): README/ARCHITECTURE/REQUIREMENTS синхронизированы с v0.6 (роли, команды, layout, §10.13, journal 2025→2026) |
 | 2026-09 | 41f3a15 | Волна 4 (eval): 3 regression-кейса (gap-markers, cross-lingual recallSearch, tail-race), wallMs-метрики; live-прогон 8 кейсов: survival 0.97, poison 0, recall 2/2 |
 | 2026-09 | 822b023 | **v0.6.0** (тег): волны 1-5 — 22 фикса, рефакторинг (RunManager, 6-модульный адаптер, payload, −topKBudgetTokens), промпты + RU/EN-мост, 356 тестов |
+| 2026-09 | bd50035 | chore: q! в gitignore (локальный vllm-конфиг), REQUIREMENTS год 2026 |
+| 2026-09 | 4fc03a4 | Волна 6 (mcp): ленивый init + кэш состояния (A7), инвалидация по env/mtime/size/session; 5 тестов |
+| 2026-09 | 8066601 | Волна 6 (core): реальный observer-параллелизм (R4: dispatched watermark + in-flight cap, skip/rollback при failure) + status()-кэш, O(1) maxSeq (R5); 367 тестов |
+| 2026-09 | 051fff2 | **v0.7.0** (тег): волна 6 — R4 (фича), R5, A7, мелочи |
