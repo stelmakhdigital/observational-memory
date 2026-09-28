@@ -37,7 +37,9 @@ describe('renderExtractorPrompt', () => {
     expect(p).toContain('profile');
     expect(p).toContain('User profile');
     expect(p).toContain('"lang": "ru"');
-    expect(p).toContain('[a] user prefers tabs'); // observation rendered as [<id>]
+    // observation rendered as [<id>] (YYYY-MM-DD) content (P4: asOf must be derivable)
+    expect(p).toMatch(/\[a\] \(\d{4}-\d{2}-\d{2}\) user prefers tabs/);
+    expect(p).toContain('asOf = YYYY-MM-DD shown in the pool');
     expect(p).toContain('EXTRACTED_JSON');
     expect(p).toContain('END_EXTRACTED_JSON');
     expect(p).toContain('sess-42');
@@ -56,6 +58,36 @@ describe('renderExtractorPrompt', () => {
     });
     expect(p).toContain('(not stored yet)');
     expect(p).toContain('(empty');
+  });
+
+  it('pool line without a valid createdAt falls back to [<id>] content', () => {
+    const p = renderExtractorPrompt({
+      runId: 'r1',
+      role: 'extractor',
+      extract: {
+        specs: [{ id: 'x', name: 'X', description: 'd' }],
+        current: {},
+        observations: [obs('b', 'some fact')],
+        sessionDir: '/tmp/s',
+      },
+    });
+    expect(p).toContain('[b]');
+    expect(p).toContain('some fact');
+  });
+
+  it('pool line keeps a non-ISO createdAt without a date', () => {
+    const p = renderExtractorPrompt({
+      runId: 'r1',
+      role: 'extractor',
+      extract: {
+        specs: [{ id: 'x', name: 'X', description: 'd' }],
+        current: {},
+        observations: [{ ...obs('c', 'old fact'), createdAt: 'not-a-date' }],
+        sessionDir: '/tmp/s',
+      },
+    });
+    expect(p).toContain('[c] old fact');
+    expect(p).not.toContain('[c] (');
   });
 });
 

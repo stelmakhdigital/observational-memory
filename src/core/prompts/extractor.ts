@@ -24,8 +24,12 @@ export function renderExtractorPrompt(input: WorkerInput, opts: ExtractorPromptO
     })
     .join('\n');
 
+  // Render each pool line with its date so `asOf` is derivable without guessing
+  // (createdAt is an ISO timestamp; fall back to a bare line if it is malformed).
+  const dateOf = (o: Observation): string =>
+    /^\d{4}-\d{2}-\d{2}/.exec(o.createdAt)?.[0] ?? '';
   const observations = ex.observations
-    .map((o) => `[${o.id}] ${o.content}`)
+    .map((o) => (dateOf(o) ? `[${o.id}] (${dateOf(o)}) ${o.content}` : `[${o.id}] ${o.content}`))
     .join('\n');
 
   return [
@@ -36,7 +40,8 @@ export function renderExtractorPrompt(input: WorkerInput, opts: ExtractorPromptO
     'update fields that changed, drop stale facts, and keep it compact and factual.',
     'Never invent facts that are not supported by the observations.',
     'When a field’s evidence gets newer, keep the field and note its freshness with an',
-    '`asOf` date (YYYY-MM-DD of the newest supporting observation); for object values you',
+    '`asOf` date — asOf = YYYY-MM-DD shown in the pool (the newest supporting observation’s',
+    'date); for object values you',
     'may add `sourceIds` (observation ids) so the value stays verifiable.',
     '',
     'VALUES TO MAINTAIN:',

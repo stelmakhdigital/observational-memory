@@ -123,6 +123,26 @@ describe('prompts', () => {
     expect(p).toContain('(proj-x)');
   });
 
+  it('observer prompt v0.5 quality rules (P1)', () => {
+    const p = renderObserverPrompt(
+      { runId: 'r1', role: 'observer', chunk: { text: 'h', overlapContext: '', coversUpToId: 'm1' } },
+      {},
+    );
+    // (1) output language follows the slice
+    expect(p).toContain('dominant language of the slice');
+    expect(p).toContain('RU observation');
+    // (2) explicit remember requests exempt from the P0 cap (no contradiction)
+    expect(p).toContain('do NOT count against the limit');
+    expect(p).toContain('at most 2-3 per slice');
+    expect(p).not.toContain('no plans for the future');
+    // (3) pending/blocking states are facts
+    expect(p).toContain("waiting for X' / 'blocked on X");
+    // (4) soft preferences are P1
+    expect(p).toContain('must be recorded even when unstressed');
+    // (5) secret boundary
+    expect(p).toContain('even inside an');
+  });
+
   it('observer prompt throws without chunk', () => {
     expect(() => renderObserverPrompt({ runId: 'r1', role: 'observer' }, {})).toThrow();
   });
@@ -170,6 +190,24 @@ describe('prompts', () => {
     expect(p).toContain('the session concluded');
     // (c) oldest-segment compression past journeyTargetTokens
     expect(p).toContain('compress the OLDEST segments');
+  });
+
+  it('consolidator prompt v0.5 quality rules (P2)', () => {
+    const p = rc2(
+      {
+        runId: 'r4',
+        role: 'consolidator',
+        pool: { observations: [], sessionDir: '/tmp/s1', journey: '' },
+      },
+      { session: 's1', journeyTargetTokens: 100 },
+    );
+    // (1) supersede without an invented date
+    expect(p).toContain("'superseded: <old> -> <new>'");
+    expect(p).toContain('ONLY if it is present in the observations');
+    // (2) idempotency
+    expect(p).toContain('already merged');
+    // (3) journey compression keeps specifics
+    expect(p).toContain('NEVER drop named entities, file paths, decisions, or exact values');
   });
 
   it('consolidator prompt throws without pool', () => {

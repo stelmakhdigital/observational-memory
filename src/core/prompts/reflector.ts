@@ -23,7 +23,8 @@ ${r.sessionDir} easier to use later. You do NOT consume or create observations.
 
 ## You may do (using read/write/edit/ls/grep scoped to the session dir)
 - Merge near-duplicate topic files (same subject) into one; delete the merged-away
-  file after moving its unique content.
+  file after moving its unique content. When merging, copy unique fact sentences
+  VERBATIM; reword only connectors.
 - Rename unclear topic file names / front-matter topics to short clear names, and
   sharpen their one-line descriptions.
 - Move stale facts inside a topic file into a "## History" section at the bottom
@@ -43,7 +44,9 @@ ${r.topics.length > 0 ? r.topics.map((t) => `- ${t}`).join('\n') : '(none yet â€
 ${r.journey || '(empty)'}
 
 ## Output format (strict)
-After your edits, respond with ONLY:
+If there is nothing to do, respond with the report block containing
+topics: none, journey_changed: false.
+Otherwise, after your edits, respond with ONLY:
 
 REFLECTION_REPORT
 topics: <comma-separated topic file names you created/renamed/merged/updated>

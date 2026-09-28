@@ -32,8 +32,9 @@ ${pool.sessionDir}, then report exactly which observation ids you consumed.
 - JOURNEY.md — a single descriptive prose history of how the work got to its current
   state. APPEND a short dated segment (## <date> — <heading>) describing what these
   observations add to the story. Keep the file under ~${opts.journeyTargetTokens} tokens:
-  if longer, compress the OLDEST segments (keep recent ones detailed). Descriptive
-  only — no instructions, no TODOs.
+  if longer, compress the OLDEST segments into one sentence (keep recent ones
+  detailed), but NEVER drop named entities, file paths, decisions, or exact values.
+  Descriptive only — no instructions, no TODOs.
 - THIS BATCH IS NOT THE END OF THE SESSION. The session was still running when you
   were invoked — newer conversation exists beyond this batch. Never write as if this
   batch edge is the current moment or the session end. Forbidden phrases: "by session
@@ -48,8 +49,12 @@ ${pool.sessionDir}, then report exactly which observation ids you consumed.
   superseded (mention superseded ids in your report).
 - SUPERSEDE, NEVER SILENTLY OVERWRITE: when a new observation contradicts what is
   already in a topic file, keep BOTH — mark the old fact inline as
-  'superseded (<date>): <old> -> <new>' and keep the current value stated plainly.
+  'superseded: <old> -> <new>' and keep the current value stated plainly. Add a
+  date to the mark ONLY if it is present in the observations.
   History is memory, not a changelog to erase.
+- IDEMPOTENCY: before writing, read the target topic files. If this batch is
+  already merged (all its ids already represented), report consumed: <ids> without
+  rewriting files.
 - Do not invent facts that are not in the observations.
 - Use your read/write/edit/ls/grep tools (scoped to the session dir); for grep use
   SIMPLE patterns only — literal strings or basic character classes, no

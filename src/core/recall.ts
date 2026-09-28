@@ -72,12 +72,71 @@ const STOPWORDS = new Set(
     .filter(Boolean),
 );
 
-/** Tokenize: lowercase, keep latin/cyrillic words ≥ 2 chars, drop stopwords. */
+/**
+ * Deterministic RU/EN bridge (P5): frequent domain terms → cross-language
+ * synonyms. BM25 has no stemming/synonyms, so without this «таймзона» never
+ * matches "timezone". Applied as a plain multiset union in tokenize (no
+ * weights) — no LLM, fully deterministic (NFR model-free).
+ */
+export const BRIDGE: Record<string, string[]> = {
+  // timezone / таймзона / часовой пояс
+  timezone: ['таймзона', 'часовой', 'пояс'],
+  таймзона: ['timezone', 'часовой', 'пояс'],
+  часовой: ['timezone', 'таймзона', 'пояс'],
+  пояс: ['timezone', 'таймзона', 'часовой'],
+  // release notes / заметки о релизе / анотации
+  release: ['релиз'],
+  релиз: ['release'],
+  notes: ['заметки', 'аннотации', 'анотации'],
+  заметки: ['notes', 'аннотации', 'анотации'],
+  аннотации: ['notes', 'заметки', 'анотации'],
+  анотации: ['notes', 'заметки', 'аннотации'],
+  // one-to-one pairs
+  password: ['пароль'],
+  пароль: ['password'],
+  language: ['язык'],
+  язык: ['language'],
+  memory: ['память'],
+  память: ['memory'],
+  commit: ['коммит'],
+  коммит: ['commit'],
+  branch: ['ветка'],
+  ветка: ['branch'],
+  token: ['токен'],
+  токен: ['token'],
+  model: ['модель'],
+  модель: ['model'],
+  setting: ['настройка'],
+  настройка: ['setting'],
+  test: ['тест'],
+  тест: ['test'],
+  session: ['сессия'],
+  сессия: ['session'],
+  error: ['ошибка'],
+  ошибка: ['error'],
+  budget: ['бюджет'],
+  бюджет: ['budget'],
+  // cost / стоимость / затраты
+  cost: ['стоимость', 'затраты'],
+  стоимость: ['cost'],
+  затраты: ['cost'],
+  observation: ['наблюдение'],
+  наблюдение: ['observation'],
+  topic: ['тема'],
+  тема: ['topic'],
+};
+
+/**
+ * Tokenize: lowercase, keep latin/cyrillic words ≥ 2 chars, drop stopwords,
+ * then expand every token with its BRIDGE synonyms (multiset union).
+ */
 export function tokenize(text: string): string[] {
   const out: string[] = [];
   for (const m of text.toLowerCase().matchAll(/[a-zа-яё0-9_\-\.]{2,}/g)) {
     const t = m[0];
-    if (!STOPWORDS.has(t)) out.push(t);
+    if (STOPWORDS.has(t)) continue;
+    out.push(t);
+    for (const syn of BRIDGE[t] ?? []) out.push(syn);
   }
   return out;
 }
