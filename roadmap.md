@@ -150,3 +150,6 @@
 | 2026-09 | a10d060 | Волна 2 (mcp): notifications без ответа + ping (A11), один ledger.read в om_status (A16) |
 | 2026-09 | 72765ca | Волна 2 (pi): settings whitelist fail-loudly (A6), timeout-listener release (A8), stdout/stderr капы (A9), tail-first indexAfter (A13), readCapped (A15); 329 тестов |
 | 2026-09 | 1ef29b1 | Волна 2 (core): idempotent commit-retry (R3), sumCosts unknown role (R6), invalid since/until (R7), seed-after-success (R8), gap-dedup persist (R9), async compact-drain (A5), /om:recall validation (A12); 346 тестов |
+| 2026-09 | cfb3f8f | Волна 3 (core): RunManager вынесен из оркестратора (S1), единая payload-валидация + serialize.ts удалён (S3/D1), topKBudgetTokens убран (S7), core/testing subpath (S9), dead code D2-D12 |
+| 2026-09 | 9dd8fec | Волна 3 (pi): index.ts 546→124 (6 модулей, S4), role-таблица runner (S2), walkDir (S5), worker-env (S6), PiContext.mode (S8) |
+| 2026-09 | e5f5d14 | Волна 3 (tests): общие фикстуры mocks.ts (S11), identityEstimate (D13), graft/ в gitignore (D14), ARCHITECTURE eval-зависимость (S10); 345 тестов |
