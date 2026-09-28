@@ -1,9 +1,14 @@
 /**
  * PiHistorySource: maps pi session entries onto the core HistorySource seam.
  *
- * Message ids are the session entry ids (uuidv7 — millisecond-prefixed, so
- * lexicographic order equals chronological order, satisfying the watermark
- * comparability contract in ledger/progress.ts).
+ * Id comparability: pi 0.87.x session entry ids are `randomUUID().slice(0, 8)`
+ * — RANDOM hex, lexicographic order ≠ chronological. The watermark contract
+ * (ledger/progress.ts: max coversUpToId) therefore wraps each entry id in a
+ * positional form `p{8-digit branch index}:{entryId}` — the zero-padded
+ * position orders lexicographically (= chronologically, the branch is
+ * append-only and entry indices never shift), and the entry id is kept as
+ * the suffix for branch reverse-lookup. Legacy bare-hex ids (ledgers written
+ * before this change) still resolve via suffix match.
  *
  * Entry → text extraction is defensive (roles/content shapes vary across pi
  * versions); unknown shapes degrade to a compact JSON placeholder so
@@ -21,6 +26,22 @@ import type { PiContext, PiEntry, PiSessionManager } from './types.js';
  * is the next element. Returns `fallback` when the boundary is not on the
  * branch or is its last entry.
  */
+/**
+ * Positional message id: zero-padded branch entry index + ':' + entry id.
+ * Lexicographic order == branch (chronological) order; stable across resume
+ * (append-only branch, indices never shift). Distinct from legacy bare-hex
+ * ids ('p' sorts after every hex char, so new ids always read as newer).
+ */
+export function positionalId(branchIndex: number, entryId: string): string {
+  return `p${String(branchIndex).padStart(8, '0')}:${entryId}`;
+}
+
+/** Bare pi entry id from a positional id (legacy bare-hex passes through). */
+export function entryIdOf(id: string): string {
+  const m = /^p\d+:(.+)$/.exec(id);
+  return m ? (m[1] as string) : id;
+}
+
 export function firstBranchEntryIdAfter(
   sessionManager: PiSessionManager,
   boundary: string,
@@ -28,7 +49,7 @@ export function firstBranchEntryIdAfter(
 ): string {
   if (boundary === '') return fallback;
   const branch: PiEntry[] = sessionManager.getBranch();
-  const idx = branch.findIndex((e) => e.id === boundary);
+  const idx = branch.findIndex((e) => e.id === entryIdOf(boundary));
   if (idx === -1) return fallback;
   return branch[idx + 1]?.id ?? fallback;
 }
@@ -107,15 +128,16 @@ export class PiHistorySource implements HistorySource {
     this.attachments = opts.attachments ?? 'auto';
   }
 
-  /** Current branch as OmMessage[] (ascending, entry ids preserved). */
+  /** Current branch as OmMessage[] (ascending, positional ids). */
   messages(): OmMessage[] {
     const entries = this.sessionManager().getBranch();
     const out: OmMessage[] = [];
-    for (const e of entries) {
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i]!;
       if (e.type !== 'message' || !e.message) continue;
       const text = messageText(e.message, { attachments: this.attachments });
       if (!text) continue;
-      out.push({ id: e.id, text, tokens: estimateTokens(text) });
+      out.push({ id: positionalId(i, e.id), text, tokens: estimateTokens(text) });
     }
     return out;
   }
@@ -133,11 +155,16 @@ export class PiHistorySource implements HistorySource {
       if (msgs[i]!.id === sinceId) return i + 1;
     }
     // Slow path — older watermark (long session) or unknown id (/tree
-    // rollback): full pass, keep the LAST match as before.
-    let idx = -1;
+    // rollback): full pass. Exact positional match first; a legacy bare-hex
+    // watermark (pre-positional-id ledger) or a positionally-stale id
+    // resolves via the entry-id suffix.
+    let exact = -1;
+    let suffix = -1;
     for (let i = 0; i < msgs.length; i++) {
-      if (msgs[i]!.id === sinceId) idx = i;
+      if (msgs[i]!.id === sinceId) exact = i;
+      else if (suffix === -1 && sinceId !== '' && msgs[i]!.id.endsWith(`:${sinceId}`)) suffix = i;
     }
+    const idx = exact !== -1 ? exact : suffix;
     return idx === -1 ? 0 : idx + 1;
   }
 
