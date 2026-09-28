@@ -6,3 +6,6 @@ dist-scripts/
 eval/report.json
 audit.md
 graft/
+
+# local vllm provider config (not part of the repo)
+q!

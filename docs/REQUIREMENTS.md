@@ -1,6 +1,6 @@
 # REQUIREMENTS — Observational Memory (`@stelmakhdigital/observational-memory`)
 
-Версия 1.0 · Дата: 2025-09 · Статус: принято (фаза Discovery закрыта)
+Версия 1.0 · Дата: 2026-09 · Статус: принято (фаза Discovery закрыта)
 
 ## 1. Назначение
 
