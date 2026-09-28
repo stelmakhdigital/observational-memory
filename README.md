@@ -83,7 +83,8 @@ npm test            # vitest (без LLM)
 подхватывается автоматически):
 
 ```bash
-pi install git:github.com/stelmakhdigital/observational-memory@v0.5.1   # тег
+pi install git:github.com/stelmakhdigital/observational-memory@<тег>  # актуальный тег:
+                                        # git ls-remote --tags origin | tail
 pi install /абсолютный/путь/к/observational-memory               # локальный каталог
 pi -e /абсолютный/путь/к/observational-memory                    # один раз, без установки
 pi remove git:github.com/stelmakhdigital/observational-memory          # удалить
@@ -195,6 +196,10 @@ import { createOmSession } from '@stelmakhdigital/observational-memory/core';
 
 Переменные окружения: `OM_PI_BIN` (бинарник pi), `OM_WORKER_TIMEOUT_MS` (таймаут воркера).
 
+> **Заметка (v0.6):** ключ `topKBudgetTokens` **удалён** — `maxCompactBlockTokens`
+> действует в **обоих** режимах компакции (`full` и `topK`): «весь пул, но не больше
+> бюджета» / «приоритетная обрезка до бюджета».
+
 **Модели воркеров.** По умолчанию (`"id": ""`) все воркеры (observer, consolidator,
 extractor, reflect) работают на **модели хоста** — той же, на которой запущен сам
 агент (берётся при старте сессии). Так OM «из коробки» работает с любым настроенным
@@ -302,7 +307,7 @@ raw chunks (token-bounded)
 ### Слои без LLM (быстро, токены не расходуются)
 
 ```bash
-npm test          # 209 тестов (vitest)
+npm test          # 345 тестов (vitest)
 npm run typecheck # tsc --noEmit
 npm run demo      # полный пайплайн в "чужом" агенте, без LLM/pi (скриптованный runner)
 ```
@@ -324,7 +329,7 @@ npm run demo      # полный пайплайн в "чужом" агенте, 
 это фактический «модельный слой» проекта, и eval измеряет, что он реально выдаёт.
 
 Как работает:
-1. `npm run build` → запуск `eval/run.js`;
+1. `npm run build:scripts` → запуск `dist-scripts/eval/run.js`;
 2. читает скриптовые сессии из `eval/cases/*.json`: список реплик диалога
    (`turns`) + `expectedFacts` — ключевые факты, которые обязаны выжить;
 3. прогоняет каждый кейс через **полный реальный пайплайн**: observers →

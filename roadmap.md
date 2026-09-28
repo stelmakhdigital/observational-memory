@@ -104,34 +104,34 @@
 ## Журнал коммитов
 | Дата | Commit | Содержание |
 |------|--------|-----------|
-| 2025-09 | 594b50e | Discovery: чартер проекта, сбор требований, решения (PROJECT_MEMORY.md, roadmap.md, AGENTS.md, .gitignore) |
-| 2025-09 | d3256cf | Discovery: спецификация требований (docs/REQUIREMENTS.md) — фаза закрыта |
-| 2025-09 | d225aee | Planning: архитектура (docs/ARCHITECTURE.md) |
-| 2025-09 | a4593cb | Sprint 1: skeleton пакета + core types/config/ids + unit-тесты (12 passed) |
-| 2025-09 | ca5532e | Sprint 2: tokens + chunker + unit-тесты (26 passed) |
-| 2025-09 | 1748fb4 | Sprint 3: ledger (pool/progress/render/serialize) + unit-тесты (45 passed) |
-| 2025-09 | 21eedbb | Sprint 4: memory-store + gap-markers + cost + unit-тесты (64 passed) |
-| 2025-09 | 0b86968 | Sprint 5: prompts (observer/consolidator) + worker-output parser + тесты (77 passed) |
-| 2025-09 | 95dbb6b | Sprint 6: orchestrator + интеграционные тесты пайплайна (88 passed) |
-| 2025-09 | d2d8f4a | Sprint 7: adapter pi (config/history/ledger/runner/index) + unit-тесты (111 passed) |
-| 2025-09 | 35a7667 | Sprint 8: README + package.json + smoke-тест точки входа (115 passed) |
-| 2025-09 | d00407c | roadmap: синхронизация Design-секции со спринтами 6–8 |
-| 2025-09 | 7aba3b4 | Release review: мёртвый export убран, ARCHITECTURE синхронизирован с финальным layout |
-| 2025-09 | 9cbc621 | docs: отметка релиз-обзора, журнал коммитов |
-| 2025-09 | 7d4728c | v1.1: worker scope-hardening (scoped-tools, worker.ts, runner --no-builtin-tools, 130 passed) |
-| 2025-09 | a76501e | Packaging для git-install: pi-манифест, keyword pi-package, typebox → peerDeps, packaging-тесты (134 passed) |
-| 2025-09 | f19ac2e | v2: extractors (ExtractorSpec, роль extractor, prompt+парсер, extracted/<id>.json, /om:extract, 149 passed) |
-| 2025-09 | 48926e5 | docs: packaging (git-install) и extractors в PROJECT_MEMORY/roadmap |
-| 2025-09 | 806bc1f | Release v0.1.0: version bump 0.1.0 + тег v0.1.0 |
-| 2025-09 | 368854d | docs: ручной smoke в реальном pi пройден (48 obs, консолидации, экстракторы, OM-компакция); smoke-пороги из конфига убраны |
-| 2025-09 | 3b2d1cb | v2: early activation (model_select + idle) + fork-seed копирует extracted/ (155 passed); запушено: main + тег v0.1.0 → github.com:stelmakhdigital/observational-memory |
-| 2025-09 | 3982f98 | Release v0.2.0: version bump + тег v0.2.0; pi-установка переключена на git:…@v0.2.0 |
-| 2025-09 | 5ced1af | v2+: embedded-интеграция (FileLedgerStore, createOmSession, npm run demo) + quiescent shutdown/compaction, seed по флагу (165 passed) |
-| 2025-09 | 460685a | docs: landscape survey of agent-memory projects (mem0, graphiti, letta, supermemory, basic-memory) + OM gaps/priorities |
-| 2025-09 | 2dd3a6d | docs: observational-memory niche survey (Mastra OM canon + adapter ecosystem, feature-standard gaps, quick wins) |
-| 2025-09 | 7f8d858 | roadmap: proposed backlog v0.4+ (4 фазы из разведки) |
-| 2025-09 | — | v0.4 feature wave (1/2-фаза): priority-метки, current-task, includePrevious, supersede; recall (тул om_recall + /om:recall + BM25-lite + since/until), provenance sourceRange, topK-инжекция (209 тестов) |
-| 2025-09 | — | v0.4 feature wave (3/4-фаза): anti-poisoning sanitize, crash-lock FileLedgerStore, reflector (sleep-time), shared memory + seed-from force, attachments, MCP-сервер, self-eval harness; docs (README/ARCHITECTURE §10) — Release v0.4.0 |
+| 2026-09 | 594b50e | Discovery: чартер проекта, сбор требований, решения (PROJECT_MEMORY.md, roadmap.md, AGENTS.md, .gitignore) |
+| 2026-09 | d3256cf | Discovery: спецификация требований (docs/REQUIREMENTS.md) — фаза закрыта |
+| 2026-09 | d225aee | Planning: архитектура (docs/ARCHITECTURE.md) |
+| 2026-09 | a4593cb | Sprint 1: skeleton пакета + core types/config/ids + unit-тесты (12 passed) |
+| 2026-09 | ca5532e | Sprint 2: tokens + chunker + unit-тесты (26 passed) |
+| 2026-09 | 1748fb4 | Sprint 3: ledger (pool/progress/render/serialize) + unit-тесты (45 passed) |
+| 2026-09 | 21eedbb | Sprint 4: memory-store + gap-markers + cost + unit-тесты (64 passed) |
+| 2026-09 | 0b86968 | Sprint 5: prompts (observer/consolidator) + worker-output parser + тесты (77 passed) |
+| 2026-09 | 95dbb6b | Sprint 6: orchestrator + интеграционные тесты пайплайна (88 passed) |
+| 2026-09 | d2d8f4a | Sprint 7: adapter pi (config/history/ledger/runner/index) + unit-тесты (111 passed) |
+| 2026-09 | 35a7667 | Sprint 8: README + package.json + smoke-тест точки входа (115 passed) |
+| 2026-09 | d00407c | roadmap: синхронизация Design-секции со спринтами 6–8 |
+| 2026-09 | 7aba3b4 | Release review: мёртвый export убран, ARCHITECTURE синхронизирован с финальным layout |
+| 2026-09 | 9cbc621 | docs: отметка релиз-обзора, журнал коммитов |
+| 2026-09 | 7d4728c | v1.1: worker scope-hardening (scoped-tools, worker.ts, runner --no-builtin-tools, 130 passed) |
+| 2026-09 | a76501e | Packaging для git-install: pi-манифест, keyword pi-package, typebox → peerDeps, packaging-тесты (134 passed) |
+| 2026-09 | f19ac2e | v2: extractors (ExtractorSpec, роль extractor, prompt+парсер, extracted/<id>.json, /om:extract, 149 passed) |
+| 2026-09 | 48926e5 | docs: packaging (git-install) и extractors в PROJECT_MEMORY/roadmap |
+| 2026-09 | 806bc1f | Release v0.1.0: version bump 0.1.0 + тег v0.1.0 |
+| 2026-09 | 368854d | docs: ручной smoke в реальном pi пройден (48 obs, консолидации, экстракторы, OM-компакция); smoke-пороги из конфига убраны |
+| 2026-09 | 3b2d1cb | v2: early activation (model_select + idle) + fork-seed копирует extracted/ (155 passed); запушено: main + тег v0.1.0 → github.com:stelmakhdigital/observational-memory |
+| 2026-09 | 3982f98 | Release v0.2.0: version bump + тег v0.2.0; pi-установка переключена на git:…@v0.2.0 |
+| 2026-09 | 5ced1af | v2+: embedded-интеграция (FileLedgerStore, createOmSession, npm run demo) + quiescent shutdown/compaction, seed по флагу (165 passed) |
+| 2026-09 | 460685a | docs: landscape survey of agent-memory projects (mem0, graphiti, letta, supermemory, basic-memory) + OM gaps/priorities |
+| 2026-09 | 2dd3a6d | docs: observational-memory niche survey (Mastra OM canon + adapter ecosystem, feature-standard gaps, quick wins) |
+| 2026-09 | 7f8d858 | roadmap: proposed backlog v0.4+ (4 фазы из разведки) |
+| 2026-09 | — | v0.4 feature wave (1/2-фаза): priority-метки, current-task, includePrevious, supersede; recall (тул om_recall + /om:recall + BM25-lite + since/until), provenance sourceRange, topK-инжекция (209 тестов) |
+| 2026-09 | — | v0.4 feature wave (3/4-фаза): anti-poisoning sanitize, crash-lock FileLedgerStore, reflector (sleep-time), shared memory + seed-from force, attachments, MCP-сервер, self-eval harness; docs (README/ARCHITECTURE §10) — Release v0.4.0 |
 | 2026-09 | — | Аудит 26.09: live smoke (qwen3.8-27b-fp8, 0 крашей) + код-ревью (1 critical C1: getEntries vs getBranch; 6 major) + аудит референса (MIT, перенять: auto-resume/skip-wait/snap); результаты в audit.md (gitignored); .gitignore + PROJECT_MEMORY синхронизированы |
 | 2026-09 | — | Фиксы P0: C1 getBranch + n9 dedup sourceRange; M1 drain-race+watchdog, M2 --no-session, killTree; M3 poolHardCapTokens+maxCompactBlockTokens (trim всегда); n11 дефолт-модель=хост, runs≠cost>0; 239 тестов (28 файлов), typecheck чисто |
 | 2026-09 | — | Фиксы P1: M5 MCP читает pi-session JSONL; M6 retry только коммита; n10 pickReportBody; n4 realpath/symlink; n5 grep-лимиты; порт референса: auto-resume, canSkipObserverWait, cutoff-snap (закрыта дыра), JOURNEY; 278 тестов |
@@ -139,7 +139,6 @@
 | 2026-09 | — | Release v0.5.0: version bump + тег v0.5.0 (P0+P1+P2 волна фиксов по аудиту 26.09) |
 | 2026-09 | — | fix install (d58879c): typescript/@types/node → dependencies (build под --omit=dev), typebox убран из devDeps (peer-install), v0.5.1 + тег; README @v0.5.1 (fca276c) |
 | 2026-09 | — | Live smoke v0.5.1 (27.09, qwen3.8-27b-fp8): 13/13 — M2 (0 worker-сессий), runs-счётчик, модель хоста, resume, изоляция, 0 крашей; находки: auto-compact в print-режиме не сработал (isIdle? — TUI-проверка), slash-only сессии не персистятся в headless |
-| 2026-09 | — | Fix install: typescript+@types/node → dependencies, typebox убран из devDeps (peer авто-ставится npm), version 0.5.1 — prepare/build работает под npm install --omit=dev (pi git-install падал: tsc not found); live-проверено: tarball-install и git-clone+install --omit=dev; 289 тестов |
 | 2026-09 | a134e45 | v0.5.2: диагностический лог auto-compaction skip (not idle at agent_end) + smoke-отчёт в доках |
 | 2026-09 | 844d628 | v0.5.3: guard ui.setStatus (TUI boot-ctx без метода — декоративный статус не ломает пайплайн) + регресс-тест; 291 тест |
 | 2026-09 | c4141a5→43deb9a | v0.5.4: guard ВСЕХ ui-вызовов (notify+setStatus, hasUI=true с деградированным ui — live TUI) + stderr-диагностика «ui anomaly» + report()→console fallback; 292 теста |

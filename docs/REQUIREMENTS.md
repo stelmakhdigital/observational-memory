@@ -117,8 +117,9 @@ Agent-agnostic библиотека Observational Memory (OM) для LLM-аге�
   интерфейсы: `ModelRunner`, `HistorySource`, `LedgerStore`, `EventSink`, `MemoryRoot`.
 - FR-10.2 Все LLM-вызовы — только через `ModelRunner.run(role, input)` → заменяемо
   mock'ом в тестах.
-- FR-10.3 Публичный API: `./core` (оркестратор + интерфейсы), `./adapters/pi`
-  (готовый entry расширения pi).
+- FR-10.3 Публичный API: `./core` (оркестратор + интерфейсы), `./core/testing`
+  (DemoHistory для embed/eval), `./adapters/pi` (готовый entry расширения pi),
+  `./adapters/mcp` (read-only MCP-сервер).
 
 ## 4. Нефункциональные требования
 
@@ -139,19 +140,24 @@ Agent-agnostic библиотека Observational Memory (OM) для LLM-аге�
   тесты пайплайна, smoke адаптера.
 - **NFR-8 Совместимость:** Node 20+, ESM, TS strict, pi ≥ 0.86.1.
 
-## 5. Scope v2 (не в v1, задел интерфейсов)
+## 5. Scope v2 — реализовано (v0.1–v0.4)
 
-- Extractors (Mastra-style): извлечение структурированных значений (профиль юзера и т.п.)
-  через extension point ядра (интерфейс `ExtractorHook`).
-- Early activation: активация буфера до порога при idle/смене провайдера
-  (extension point `ActivationPolicy`).
-- Дополнительные адаптеры (не-pi).
+- Extractors (Mastra-style, **реализовано v0.1–v0.2**): извлечение структурированных
+  значений (профиль юзера, current-task и т.п.) через extension point ядра
+  (интерфейс `ExtractorSpec` + роль `extractor`, `/om:extract`, `includePrevious`).
+- Early activation (активация буфера до порога при idle/смене провайдера,
+  **реализовано v0.2**): конфиг `earlyActivation` (тип `EarlyActivationConfig`:
+  `enabled`/`idleMs`/`minUnobservedTokens`).
+- Дополнительные адаптеры (не-pi, **реализовано v0.1–v0.4**): embedded-core
+  (`./core` + `FileLedgerStore` + `createOmSession`, `npm run demo`) и
+  MCP-адаптер (`./adapters/mcp`).
 
 ## 6. Ограничения и предпосылки
 
 - pi ≥ 0.86.1; бинарник `pi` доступен в PATH (или `piBinary` в конфиге).
 - LLM-доступ (провайдеры) настраивается пользователем в самом pi.
-- Язык: TypeScript; пакет: единый npm, exports `./core`, `./adapters/pi`.
+- Язык: TypeScript; пакет: единый npm, exports `./core`, `./core/testing`,
+  `./adapters/pi`, `./adapters/mcp`.
 
 ## 7. Риски (PMBOK: Identify Risks)
 

@@ -25,7 +25,7 @@
 ## 2. Модель данных (core/types)
 
 ```ts
-type Role = 'observer' | 'consolidator';
+type Role = 'observer' | 'consolidator' | 'extractor' | 'reflect';
 
 interface Observation {
   id: string;            // unique, second-resolution, re-derived at commit (см. ids)
@@ -33,6 +33,9 @@ interface Observation {
   content: string;       // атомарная заметка
   tokenCount: number;
   createdAt: string;     // ISO timestamp события
+  priority?: 'critical' | 'important' | 'routine';  // v0.4 (нет → routine)
+  quarantined?: boolean;            // v0.4: anti-poisoning → рендер [UNVERIFIED]
+  sourceRange?: { fromId: string; toId: string };  // v0.4: provenance
 }
 
 type LedgerEntryType =
@@ -172,7 +175,8 @@ onAgentEnd (idle):
 - `Projection`: порядок рендера = порядок коммита, группировка по чанкам.
 - `Render` (model-free): `[obs id/timestamp] content` + разделитель; суммарные
   tokenCount; cutoff снапится на границу чанка (FR-3.4).
-- `Serialize` (для LedgerStore payloads): versioned JSON, миграции forward-only.
+- `Serialize` (payload'ы LedgerStore, `ledger/payload.ts` — единая валидация;
+  отдельный serialize.ts удалён в v0.6): versioned JSON, миграции forward-only.
 
 ### 4.3 Chunker + Tokens
 
@@ -267,11 +271,14 @@ onAgentEnd (idle):
 
 ### 5.3 Команды и UI (FR-7)
 
-`/om [on|off]`, `/om:status`, `/om:compact`, `/om:consolidate` — через
-`pi.registerCommand` (реализованы в `index.ts`); конфиг — `observational-memory`
+9 команд + агентский тул — через `pi.registerCommand` / `pi.registerTool`:
+`/om [on|off]`, `/om:status`, `/om:compact`, `/om:consolidate`, `/om:extract`,
+`/om:recall`, `/om:reflect`, `/om:seed-from` и тул `om_recall` (агент ищет в
+памяти сам, посреди диалога). Реализованы в модулях `commands.ts` / `recall-tool.ts`
+(`index.ts` — тонкий entry: boot/resume/ui/sink); конфиг — `observational-memory`
 в settings.json (FR-9).
 
-### 5.4 Спайки (выполнены в Sprint 7, подтверждено по .d.ts/докам pi 0.86.1)
+### 5.4 Спайки (выполнены в Sprint 7, подтверждено по .d.ts/докам pi 0.87.x)
 
 - S1 (решено): OM-блок → `session_before_compact` возвращает `compaction.summary`
   + `firstKeptEntryId` (tail boundary).
@@ -282,20 +289,25 @@ onAgentEnd (idle):
 
 ```
 package.json            name: @stelmakhdigital/observational-memory,
-                        exports ./core ./adapters/pi ./adapters/mcp; scripts: test/typecheck/build/demo/eval/mcp
-tsconfig.json  tsconfig.build.json  vitest.config.ts
+                        exports ./core ./core/testing ./adapters/pi ./adapters/mcp;
+                        scripts: test/typecheck/build/build:scripts/demo/eval/mcp
+tsconfig.json  tsconfig.build.json  tsconfig.build.scripts.json  vitest.config.ts
 src/core/types.ts  config.ts  tokens.ts  chunker.ts  ids.ts  worker-output.ts
 src/core/recall.ts        # v0.4: tokenize/bm25/recallSearch/buildSessionRecallDocs/renderRecallHits
 src/core/sanitize.ts      # v0.4: anti-poisoning (injection-паттерны → quarantined)
-src/core/testing.ts       # v0.4: DemoHistory (in-memory HistorySource для embed/eval)
-src/core/ledger/{index,pool,progress,render,serialize,file-store}.ts
+src/core/testing.ts       # subpath ./core/testing: DemoHistory (in-memory HistorySource для embed/eval)
+src/core/ledger/{index,pool,progress,render,payload,file-store}.ts
 src/core/memory-store.ts  gap-markers.ts  cost.ts  session.ts (createOmSession)
 src/core/prompts/{observer,consolidator,extractor,reflector}.ts
-src/core/orchestrator.ts  index.ts (public API)
+src/core/orchestrator.ts  run-manager.ts  index.ts (public API)
 examples/embedded-demo.ts  (npm run demo: полный пайплайн без pi/LLM)
 eval/{run.ts, cases/*.json}  (npm run eval: self-eval с реальным LLM → report.json)
-src/adapters/pi/{index.ts,history.ts,ledger.ts,runner.ts,worker.ts,scoped-tools.ts,config.ts,types.ts}
-src/adapters/mcp/server.ts  (MCP stdio JSON-RPC: om_status/om_recall/om_topics, read-only)
+src/adapters/pi/{index.ts,boot.ts,resume.ts,ui.ts,sink.ts,commands.ts,recall-tool.ts,
+                  history.ts,ledger.ts,runner.ts,worker.ts,worker-env.ts,scoped-tools.ts,
+                  config.ts,types.ts}
+src/adapters/mcp/{server.ts,pi-ledger.ts}
+                    # MCP stdio JSON-RPC: om_status/om_recall/om_topics, read-only;
+                    # pi-ledger: tail-read pi-session JSONL (25МБ) + сверка OM_MCP_SESSION
 tests/unit/*  tests/integration/*  tests/fixtures/*
 docs/{REQUIREMENTS,ARCHITECTURE}.md  README.md  AGENTS.md  PROJECT_MEMORY.md  roadmap.md
 ```
@@ -350,7 +362,8 @@ SentioLabs) — см. PROJECT_MEMORY.md (22.09).
   `! ` (critical), пусто (important), `· ` (routine).
 - `trimToBudget(observations, budgetTokens)` — детерминированный topK: классами
   critical→important→routine, внутри класса — свежие первыми, до бюджета;
-  включается конфигом `compaction.inject: 'topK'` (+ `topKBudgetTokens`).
+  включается конфигом `compaction.inject: 'topK'` (бюджет — `maxCompactBlockTokens`;
+  отдельный ключ `topKBudgetTokens` удалён в v0.6, см. §10.13).
 
 ### 10.2 Provenance (2.2)
 - Chunker отдаёт `fromId` (первое сообщение слайса); оркестратор пишет
@@ -428,3 +441,37 @@ SentioLabs) — см. PROJECT_MEMORY.md (22.09).
   Замечание: eval не является частью agent-agnostic контракта ядра — он
   жёстко завязан на pi (PiSubprocessRunner и pi-бинарник через OM_PI_BIN);
   ядро не гарантирует его исполняемость без pi.
+
+### 10.13 v0.5–v0.6: аудит-фиксы + рефакторинг (сент. 2026)
+
+**Caps (v0.5, M3):**
+- `poolHardCapTokens` (дефолт = 3 × `consolidateAtPoolTokens`) — hard cap пула;
+  выше него консолидация форсится на каждом turn_end.
+- `maxCompactBlockTokens` (дефолт = min(0.4 × `compactAtContextTokens`,
+  `poolHardCapTokens`)) — бюджет наблюдений-части компакционного блока, действует
+  в **обоих** режимах (`full` и `topK`); ключ `topKBudgetTokens` **удалён** в v0.6.
+
+**Resume после прерванной компакции (v0.5):**
+- `resumeAfterMidRunCompaction` (default true): после авто-компакции, прервавшей
+  ход (stopReason `length`/ошибка), — скрытое «продолжи» (ручная `/om:compact`
+  не возобновляется).
+- `canSkipObserverWait`: компакция не ждёт observers, если новая история пуста
+  (fast path, порт референса).
+
+**Crash-durability file-ledger (v0.5, M4):** `FileLedgerStore` — sibling-lock через
+O_EXCL (атомарный захват), запись O_APPEND + fsync, crash-repair при старте
+(повреждённый хвост → onRepair-колбэк, не crash).
+
+**MCP pi-session-источник (v0.5/v0.6, M5 + волны 1–2):** `om_status`/`om_recall`
+читают ledger из pi-session JSONL (`OM_MCP_PI_SESSION` или авто-скан
+`~/.pi/agent/sessions/`): **tail-read** последних 25МБ (сессии > 25МБ больше не
+теряют новые наблюдения), **сверка session-id** по header-строке с
+`OM_MCP_SESSION` (чужие проекты исключены); embedded `ledger.jsonl` — fallback.
+
+**Компакция/shutdown (волны 1–2):**
+- `session_before_compact` — async: `drainForCompaction()` дожидается in-flight
+  observers до рендера блока (A5).
+- `shutdown()` — финальный pump: хвост после последнего onTurnEnd наблюдаем
+  перед drain (E1).
+- Gap-markers измеряют реальную паузу между сообщениями (`lastTwoMessageAts`),
+  а не длительность хода (R2).
