@@ -6,7 +6,7 @@ import { OmOrchestrator } from '../../src/core/orchestrator.js';
 import { resolveConfig, type OmConfig } from '../../src/core/config.js';
 import { MemoryStore } from '../../src/core/memory-store.js';
 import type { EventSink, WorkerInput } from '../../src/core/types.js';
-import { MockHistory, MockLedger, MockRunner, drafts } from '../fixtures/mocks.js';
+import { MockHistory, MockLedger, MockRunner, observerRun, consolidatorRun, settleOrch } from '../fixtures/mocks.js';
 
 const baseConfig: OmConfig = resolveConfig({
   chunkTokens: 10,
@@ -20,27 +20,8 @@ const S = 'sess-ext';
 
 function makeRunner(profileValue: Record<string, unknown>) {
   return new MockRunner(
-    {
-      result: (input: WorkerInput) => ({
-        runId: input.runId,
-        ok: true,
-        costUsd: 0.01,
-        observations: drafts(`obs from ${input.chunk!.coversUpToId}`),
-      }),
-    },
-    {
-      result: (input: WorkerInput) => ({
-        runId: input.runId,
-        ok: true,
-        costUsd: 0.02,
-        consolidation: {
-          topics: ['topic-a.md'],
-          tombstoneIds: input.pool!.observations.map((o) => o.id),
-          droppedIds: [],
-          journeyChanged: false,
-        },
-      }),
-    },
+    observerRun({ costUsd: 0.01 }),
+    consolidatorRun({ costUsd: 0.02, topics: ['topic-a.md'], tombstoneAll: true }),
     {
       result: (input: WorkerInput) => ({
         runId: input.runId,
@@ -74,9 +55,6 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-async function settle(orch: OmOrchestrator): Promise<void> {
-  await orch.shutdown();
-}
 
 describe('extractors (orchestrator integration)', () => {
   it('runs an extractor after a forced consolidation and stores the value', async () => {
@@ -98,10 +76,10 @@ describe('extractors (orchestrator integration)', () => {
     history.add('m1', 'aaaaaaaaaa');
     history.add('m2', 'bbbb');
     orch.onTurnEnd();
-    await settle(orch);
+    await settleOrch(orch);
     // force consolidation → triggers extraction
     orch.forceConsolidate();
-    await settle(orch);
+    await settleOrch(orch);
 
     const extractedCalls = runner.calls.filter((c) => c.role === 'extractor');
     expect(extractedCalls.length).toBe(1);
@@ -135,7 +113,7 @@ describe('extractors (orchestrator integration)', () => {
     });
     orch.setEnabled(true);
     orch.forceExtract();
-    await settle(orch);
+    await settleOrch(orch);
     expect(runner.calls.filter((c) => c.role === 'extractor')).toEqual([]);
   });
 
@@ -153,7 +131,7 @@ describe('extractors (orchestrator integration)', () => {
     });
     orch.setEnabled(true);
     orch.forceExtract();
-    await settle(orch);
+    await settleOrch(orch);
     expect(runner.calls.filter((c) => c.role === 'extractor')).toEqual([]);
   });
 });

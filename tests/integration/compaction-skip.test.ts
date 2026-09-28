@@ -16,7 +16,7 @@ import path from 'node:path';
 import { OmOrchestrator } from '../../src/core/orchestrator.js';
 import { resolveConfig, type OmConfig } from '../../src/core/config.js';
 import { MemoryStore } from '../../src/core/memory-store.js';
-import { MockHistory, MockLedger, drafts } from '../fixtures/mocks.js';
+import { MockHistory, MockLedger, drafts, sleep } from '../fixtures/mocks.js';
 import type {
   CompactionBlock,
   EventSink,
@@ -90,7 +90,6 @@ let sink: CaptureSink;
 let runner: GatedRunner;
 let orch: OmOrchestrator;
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** 6 messages × 15 tokens = 90; tail window 50 → raw boundary m3 (tail m4+m5+m6). */
 function addHistory(): void {

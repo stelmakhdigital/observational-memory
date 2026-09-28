@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createOmSession } from '../../src/core/session.js';
 import { resolveConfig, type OmConfig } from '../../src/core/config.js';
 import type { CompactionBlock, EventSink, WorkerInput } from '../../src/core/types.js';
-import { MockHistory, MockRunner, drafts } from '../fixtures/mocks.js';
+import { MockHistory, MockRunner, observerRun } from '../fixtures/mocks.js';
 
 const baseConfig: OmConfig = resolveConfig({
   chunkTokens: 10,
@@ -17,14 +17,7 @@ const baseConfig: OmConfig = resolveConfig({
 
 function makeRunner() {
   return new MockRunner(
-    {
-      result: (input: WorkerInput) => ({
-        runId: input.runId,
-        ok: true,
-        costUsd: 0.01,
-        observations: drafts(`obs from ${input.chunk!.coversUpToId}`),
-      }),
-    },
+    observerRun({ costUsd: 0.01 }),
     {
       // the consolidator is the LLM worker: it writes the topic file itself
       result: (input: WorkerInput) => {

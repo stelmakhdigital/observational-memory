@@ -2,11 +2,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { MockHistory, MockLedger, MockRunner, drafts, draft } from '../fixtures/mocks.js';
+import { MockHistory, MockLedger, MockRunner, drafts, draft, sleep, renderTopicFile } from '../fixtures/mocks.js';
 import { OmOrchestrator } from '../../src/core/orchestrator.js';
 import { MemoryStore } from '../../src/core/memory-store.js';
 import { createOmSession } from '../../src/core/session.js';
-import { renderTopicFile } from '../../src/core/memory-store.js';
 import { resolveConfig } from '../../src/core/config.js';
 import type { WorkerInput } from '../../src/core/types.js';
 import type { OmSession } from '../../src/core/session.js';
@@ -28,8 +27,7 @@ beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), 'om-adv-'));
 });
 
-const settle = (orch: OmOrchestrator, ms = 30) =>
-  new Promise<void>((r) => setTimeout(r, ms));
+const settle = (_orch: OmOrchestrator, ms = 30) => sleep(ms);
 
 /**
  * Feed enough history for MULTIPLE observer chunks (one chunk per onTurnEnd,
@@ -155,10 +153,12 @@ describe('priority, provenance & injection modes (v0.4/v0.5)', () => {
     // Isolate the two sessions (separate roots): the file ledger is keyed by
     // <root>/<sessionId> and a shared ledger would leak the first session's
     // watermark into the second (n9 re-observe loop). tailTokens=30 leaves
-    // 2 chunks before the tail boundary so the topK budget actually trims.
-    const mk = async (inject: 'full' | 'topK') => {
+    // 2 chunks before the tail boundary so the budget actually trims.
+    // S7: the budget in both modes is maxCompactBlockTokens — topK gets a
+    // small cap (trims), full gets a large one (keeps everything).
+    const mk = async (inject: 'full' | 'topK', maxCompactBlockTokens: number) => {
       const h = makeSession(
-        { compaction: { inject, topKBudgetTokens: 12 }, tailTokens: 30 },
+        { compaction: { inject }, maxCompactBlockTokens, tailTokens: 30 },
         {
           observer: (input: WorkerInput) => ({
             runId: input.runId,
@@ -175,10 +175,10 @@ describe('priority, provenance & injection modes (v0.4/v0.5)', () => {
       await feedChunks(h.orch, h.history);
       return h;
     };
-    const full = await mk('full');
+    const full = await mk('full', 100000);
     expect(full.orch.compactBlock().observations).toContain('routine old fact one');
 
-    const topk = await mk('topK');
+    const topk = await mk('topK', 12);
     const t = topk.orch.compactBlock().observations;
     expect(t).toContain('critical must keep');
     // budget 12 < the two chunks' 4 obs (2× critical fill the budget first)

@@ -15,7 +15,7 @@ import type {
   WorkerResult,
 } from '../../src/core/types.js';
 
-export const identityEstimate = (t: string) => t.length;
+const identityEstimate = (t: string) => t.length;
 
 /** Helper: observation drafts from plain texts (all 'routine', v0.4+). */
 export const drafts = (...texts: string[]): ObservationDraft[] =>
@@ -62,7 +62,7 @@ export class MockHistory implements HistorySource {
     this.lastAt = at ?? new Date();
   }
 
-  nextChunk(since: { coversUpToId: string; observedTokens: number }, opts?: { minTokens?: number }) {
+  nextChunk(since: { coversUpToId: string }, opts?: { minTokens?: number }) {
     return this.chunker.next(this.messages, since, opts);
   }
   currentTokens(): number {
@@ -113,7 +113,7 @@ export class MockLedger implements LedgerStore {
       .map((e) => e.entry)
       .filter((e): e is TypedLedgerEntry<T> => (type ? e.type === type : true));
   }
-  tombstone(observationIds: string[], report: { topics: string[]; journeyChanged: boolean; maxCoversUpToId?: string; maxSeq?: number }): void {
+  tombstone(observationIds: string[], report: { topics: string[]; journeyChanged: boolean; maxCoversUpToId?: string }): void {
     this.entries.push({
       entry: {
         type: 'om.tombstone',
@@ -174,3 +174,60 @@ export class MockRunner implements ModelRunner {
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
+
+/** Shared: plain sleep for test pacing. */
+export { sleep };
+
+/**
+ * Test fixture: topic file content with front-matter (moved out of core, S7-wave D8).
+ * Deterministic; mirrors what consolidator/reflect worker topic files look like.
+ */
+export function renderTopicFile(
+  topic: string,
+  description: string,
+  session: string,
+  body: string,
+): string {
+  return `---\ntopic: ${topic}\ndescription: ${description}\nsession: ${session}\n---\n\n${body.trim()}\n`;
+}
+
+/**
+ * Shared scripted observer: one (or two) "obs from <boundary>" observation(s)
+ * per chunk, optional costUsd.
+ */
+export const observerRun = (opts: { costUsd?: number; extra?: boolean } = {}): ScriptedRun => ({
+  result: (input) => ({
+    runId: input.runId,
+    ok: true,
+    ...(opts.costUsd !== undefined ? { costUsd: opts.costUsd } : {}),
+    observations: opts.extra
+      ? drafts(`obs from ${input.chunk!.coversUpToId}`, `obs2 of chunk ${input.chunk!.coversUpToId}`)
+      : drafts(`obs from ${input.chunk!.coversUpToId}`),
+  }),
+});
+
+/** Shared scripted consolidator: ok-run, optionally tombstoning the whole pool. */
+export const consolidatorRun = (
+  opts: { costUsd?: number; topics?: string[]; tombstoneAll?: boolean; journeyChanged?: boolean } = {},
+): ScriptedRun => ({
+  result: (input) => ({
+    runId: input.runId,
+    ok: true,
+    ...(opts.costUsd !== undefined ? { costUsd: opts.costUsd } : {}),
+    consolidation: {
+      topics: opts.topics ?? [],
+      tombstoneIds: opts.tombstoneAll ? input.pool!.observations.map((o) => o.id) : [],
+      droppedIds: [],
+      journeyChanged: opts.journeyChanged ?? false,
+    },
+  }),
+});
+
+/** Shared settle: drain in-flight runs (optional) then shut the orchestrator down. */
+export const settleOrch = async (
+  orch: { shutdown(): Promise<void> },
+  runner?: { drain(): Promise<void> },
+): Promise<void> => {
+  if (runner) await runner.drain();
+  await orch.shutdown();
+};

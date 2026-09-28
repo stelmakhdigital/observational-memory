@@ -425,3 +425,6 @@ SentioLabs) — см. PROJECT_MEMORY.md (22.09).
   fact survival (BM25-независимый substring по нормализованному корпусу),
   сжатие (history tokens → memory tokens), cost. Отчёт eval/report.json.
   Промпты = «модельный слой» проекта → eval — регрессионный контроль качества.
+  Замечание: eval не является частью agent-agnostic контракта ядра — он
+  жёстко завязан на pi (PiSubprocessRunner и pi-бинарник через OM_PI_BIN);
+  ядро не гарантирует его исполняемость без pi.

@@ -5,8 +5,8 @@ import path from 'node:path';
 import { OmOrchestrator } from '../../src/core/orchestrator.js';
 import { resolveConfig, type OmConfig } from '../../src/core/config.js';
 import { MemoryStore } from '../../src/core/memory-store.js';
-import type { EventSink, WorkerInput } from '../../src/core/types.js';
-import { MockHistory, MockLedger, MockRunner, drafts } from '../fixtures/mocks.js';
+import type { EventSink } from '../../src/core/types.js';
+import { MockHistory, MockLedger, MockRunner, sleep, observerRun, consolidatorRun } from '../fixtures/mocks.js';
 
 // chunkTokens 1000; early min 30; consolidation/compaction far away.
 const baseConfig: OmConfig = resolveConfig({
@@ -16,25 +16,8 @@ const baseConfig: OmConfig = resolveConfig({
   compactAtContextTokens: 1_000_000,
 });
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 function makeRunner() {
-  return new MockRunner(
-    {
-      result: (input: WorkerInput) => ({
-        runId: input.runId,
-        ok: true,
-        observations: drafts(`early obs from ${input.chunk!.coversUpToId}`),
-      }),
-    },
-    {
-      result: (input: WorkerInput) => ({
-        runId: input.runId,
-        ok: true,
-        consolidation: { topics: [], tombstoneIds: [], droppedIds: [], journeyChanged: false },
-      }),
-    },
-  );
+  return new MockRunner(observerRun(), consolidatorRun());
 }
 
 class CaptureSink implements EventSink {
