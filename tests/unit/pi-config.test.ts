@@ -29,6 +29,8 @@ describe('loadPiAdapterConfig', () => {
     expect(c.piBinary).toBe('pi');
     expect(c.workerTimeoutMs).toBe(600_000);
     expect(c.memoryDir).toBe(path.join(cwd, '.memory'));
+    // A6: clean config → no problems
+    expect(c.problems).toEqual([]);
     // n11: worker models default to '' (inherit the host model, resolved in the adapter)
     expect(c.om.models.observer.id).toBe('');
     expect(c.om.models.consolidator.id).toBe('');
@@ -66,5 +68,46 @@ describe('loadPiAdapterConfig', () => {
     writeGlobal('not json{{{');
     const c = loadPiAdapterConfig(cwd, {}, home);
     expect(c.om.chunkTokens).toBe(5000);
+  });
+
+  // A6 (FR-9.3): unknown namespace keys are ignored but REPORTED, not silent.
+  it('reports unknown keys in problems (chunkTokens2, memoryDir)', () => {
+    writeProject({ 'observational-memory': { chunkTokens2: 123, memoryDir: '/tmp/x', debugLog: true } });
+    const c = loadPiAdapterConfig(cwd, {}, home);
+    expect(c.problems).toContain('unknown key "chunkTokens2" (ignored)');
+    expect(c.problems).toContain('unknown key "memoryDir" (ignored)'); // fixed, not configurable
+    expect(c.om).not.toHaveProperty('chunkTokens2');
+    expect(c.om).not.toHaveProperty('memoryDir');
+    expect(c.om.debugLog).toBe(true); // valid key still applied
+    expect(c.om.chunkTokens).toBe(5000); // unknown sibling does not break the rest
+  });
+
+  it('no problems for valid keys (OmConfig + models.extractor)', () => {
+    writeGlobal({
+      'observational-memory': {
+        chunkTokens: 1234,
+        poolTargetTokens: 10_000,
+        models: { extractor: { id: 'x' }, reflect: { thinking: 'low' } },
+        debugLog: false,
+      },
+    });
+    const c = loadPiAdapterConfig(cwd, {}, home);
+    expect(c.problems).toEqual([]);
+    expect(c.om.chunkTokens).toBe(1234);
+    expect(c.om.models.extractor?.id).toBe('x');
+  });
+
+  it('reports unknown model roles', () => {
+    writeProject({ 'observational-memory': { models: { bogus: { id: 'x' } } } });
+    const c = loadPiAdapterConfig(cwd, {}, home);
+    expect(c.problems).toContain('unknown key "models.bogus" (ignored)');
+    expect(c.om.models).not.toHaveProperty('bogus');
+  });
+
+  it('reports an invalid attachments value', () => {
+    writeProject({ 'observational-memory': { attachments: 'banana' } });
+    const c = loadPiAdapterConfig(cwd, {}, home);
+    expect(c.problems.some((p) => p.startsWith('attachments'))).toBe(true);
+    expect(c.attachments).toBe('auto'); // degrades to the default
   });
 });

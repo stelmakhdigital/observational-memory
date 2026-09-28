@@ -226,6 +226,32 @@ describe('PiHistorySource', () => {
     });
   });
 
+  // A13: indexAfter searches from the TAIL first (watermarks usually point
+  // near the newest covered chunk) with a full-pass fallback.
+  describe('A13: indexAfter on a 2000-message branch', () => {
+    const N = 2000;
+    const many: PiEntry[] = Array.from({ length: N }, (_, i) => msg(`m${i}`, 'same same same same'));
+    const src2 = new PiHistorySource(
+      () => makeCtx(many).sessionManager,
+      () => makeCtx(many, null),
+      { chunkTokens: 10_000 },
+    );
+    const T = src2.messages()[0]!.tokens ?? 0;
+    it('watermark near the tail (fast path) counts the rest', () => {
+      expect(src2.unobservedTokens('m1997')).toBe(2 * T);
+      expect(src2.unobservedTokens('m1998')).toBe(T);
+      expect(src2.unobservedTokens('m1999')).toBe(0);
+      expect(src2.unobservedTokens('')).toBe(N * T);
+    });
+    it('watermark at the head (slow path) still resolves correctly', () => {
+      expect(src2.unobservedTokens('m0')).toBe((N - 1) * T);
+      expect(src2.unobservedTokens('m49')).toBe((N - 50) * T); // outside the tail-50 window
+    });
+    it('unknown watermark rolls back to the start (rollback-safe)', () => {
+      expect(src2.unobservedTokens('dead-branch-id')).toBe(N * T);
+    });
+  });
+
   describe('firstBranchEntryIdAfter (C1: firstKeptEntryId within the branch)', () => {
     const sm = (branch: PiEntry[], all?: PiEntry[]): PiSessionManager => ({
       getEntries: () => all ?? branch,

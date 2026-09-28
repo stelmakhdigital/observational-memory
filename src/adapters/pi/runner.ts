@@ -45,6 +45,19 @@ export interface PiSubprocessRunnerOptions {
   debug?: (msg: string) => void;
 }
 
+// A9: cap for the captured worker stdout. The report body is picked from the
+// END of the stream (pickReportBody scans texts newest-first), so the TAIL is
+// what matters — a hung chatty worker must not grow the buffer unboundedly.
+export const MAX_STDOUT_CHARS = 2_000_000;
+// stderr is only ever used via .slice(-400) in an error message — tiny cap.
+const MAX_STDERR_CHARS = 4_096;
+
+/** A9: append + keep only the tail (≤ cap) — O(1) per chunk past the cap. */
+export function appendCapped(s: string, chunk: string, cap: number): string {
+  s += chunk;
+  return s.length > cap ? s.slice(-cap) : s;
+}
+
 function modelFlag(ref: ModelRef): string {
   const base = ref.provider ? `${ref.provider}/${ref.id}` : ref.id;
   return ref.thinking && ref.thinking !== 'off' ? `${base}:${ref.thinking}` : base;
@@ -204,8 +217,15 @@ export class PiSubprocessRunner implements ModelRunner {
         this.killTree(proc);
         // Stop accumulating stdout/stderr: a grandchild may keep the pipes open
         // and streaming data into `stdout`/`stderr` forever.
-        proc.stdout?.removeAllListeners('data');
-        proc.stderr?.removeAllListeners('data');
+        proc.stdout?.removeAllListeners();
+        proc.stderr?.removeAllListeners();
+        // A8: detach the close/error listeners (and their captured stdout/
+        // stderr strings) and destroy the pipes — they would otherwise hang
+        // until 'close', which may never come if a grandchild holds the pipe.
+        proc.removeAllListeners('close');
+        proc.removeAllListeners('error');
+        proc.stdout?.destroy();
+        proc.stderr?.destroy();
         finish({ runId: input.runId, ok: false, error: `worker timed out after ${this.o.timeoutMs}ms` });
       }, this.o.timeoutMs ?? 10 * 60 * 1000);
       // Safe to unref: while the child is alive the loop cannot exit anyway;
@@ -213,8 +233,9 @@ export class PiSubprocessRunner implements ModelRunner {
       // the timer alone pinning the pi process for the full timeout.
       timer.unref();
 
-      proc.stdout?.on('data', (d: Buffer) => (stdout += d.toString('utf8')));
-      proc.stderr?.on('data', (d: Buffer) => (stderr += d.toString('utf8')));
+      // A9: capped tail — a chatty hung worker cannot bloat the buffers.
+      proc.stdout?.on('data', (d: Buffer) => (stdout = appendCapped(stdout, d.toString('utf8'), MAX_STDOUT_CHARS)));
+      proc.stderr?.on('data', (d: Buffer) => (stderr = appendCapped(stderr, d.toString('utf8'), MAX_STDERR_CHARS)));
       proc.on('error', (e) => {
         clearTimeout(timer);
         finish({ runId: input.runId, ok: false, error: `process error: ${e.message}` });

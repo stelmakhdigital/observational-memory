@@ -35,6 +35,18 @@ export interface ScopedTool {
 }
 
 const MAX_READ_BYTES = 100_000;
+
+/**
+ * A15: read a file capped at MAX_READ_BYTES BYTES (not chars — the old code
+ * confused Buffer.byteLength with string slice). utf8-decoding the subarray
+ * is safe when the cap lands mid-character: Node replaces the dangling byte
+ * with U+FFFD instead of throwing.
+ */
+export function readCapped(p: string): { text: string; truncated: boolean } {
+  const buf = readFileSync(p);
+  if (buf.length <= MAX_READ_BYTES) return { text: buf.toString('utf8'), truncated: false };
+  return { text: buf.subarray(0, MAX_READ_BYTES).toString('utf8'), truncated: true };
+}
 const MAX_GREP_MATCHES = 100;
 // n5: hard caps bounding the grep work (catastrophic-backtracking defense is
 // INCOMPLETE without a worker-thread timeout — see audit n5, P2 residual risk).
@@ -127,13 +139,11 @@ export function createScopedFileTools(dir: string): ScopedTool[] {
     async execute(_id, params) {
       try {
         const p = resolveContained(root, str(params, 'path'));
-        const text = await fs.readFile(p, 'utf8');
-        if (Buffer.byteLength(text) > MAX_READ_BYTES) {
-          return ok(
-            text.slice(0, MAX_READ_BYTES) + `\n[truncated: file exceeds ${MAX_READ_BYTES} chars]`,
-          );
-        }
-        return ok(text);
+        // A15: byte-capped read (multibyte-safe at the cap boundary).
+        const { text, truncated } = readCapped(p);
+        return ok(
+          truncated ? `${text}\n[truncated: file exceeds ${MAX_READ_BYTES} bytes]` : text,
+        );
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
       }
@@ -255,8 +265,9 @@ Fails unless oldText occurs exactly once.`,
           }
         };
         if (existsSync(base) && statSync(base).isFile()) {
-          const content = readFileSync(base, 'utf8');
-          const lines = content.split(/\r?\n/);
+          // A15: byte-capped read (was uncapped readFileSync).
+          const { text } = readCapped(base);
+          const lines = text.split(/\r?\n/);
           for (let i = 0; i < lines.length && matches.length < MAX_GREP_MATCHES; i++) {
             re.lastIndex = 0;
             if (re.test(lines[i]!)) matches.push(`${path.relative(root, base)}:${i + 1}: ${lines[i]!.slice(0, 300)}`);

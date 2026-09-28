@@ -13,6 +13,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PiSubprocessRunner } from '../../src/adapters/pi/runner.js';
+import { appendCapped, MAX_STDOUT_CHARS } from '../../src/adapters/pi/runner.js';
 
 const spawnMock = vi.fn();
 vi.mock('node:child_process', async (importOriginal) => {
@@ -30,6 +31,9 @@ function makeMockChild(): any {
   ee.killed = false;
   ee.stdout = new EventEmitter();
   ee.stderr = new EventEmitter();
+  // A8: the runner destroys the pipes on timeout — the mocks must support it.
+  ee.stdout.destroy = vi.fn();
+  ee.stderr.destroy = vi.fn();
   ee.kill = vi.fn(() => true);
   return ee;
 }
@@ -92,6 +96,40 @@ describe('worker kill semantics (n1/n2)', () => {
     // Data pushed after the timeout is simply dropped.
     child.stdout.emit('data', Buffer.from('junk that must not be captured'));
     expect(child.stdout.listenerCount('data')).toBe(0);
+    // A8: close/error listeners detached and the pipes destroyed — the
+    // captured stdout/stderr strings die with the close closure, and
+    // drain() has nothing left to wait for (the 'close' may never come).
+    expect(child.listenerCount('close')).toBe(0);
+    expect(child.listenerCount('error')).toBe(0);
+    expect(child.stdout.destroy).toHaveBeenCalled();
+    expect(child.stderr.destroy).toHaveBeenCalled();
+    // drain() must not hang on the (never coming) 'close' of the timed-out
+    // child — it was already removed from the active set by finish().
+    await expect(r.drain()).resolves.toBeUndefined();
+  });
+
+  it('A9: a 5MB chatty stream is capped and the report (at the END) still parses', async () => {
+    const child = makeMockChild();
+    spawnMock.mockReturnValue(child);
+    const r = makeRunner(15_000);
+    const p = r.run('observer', observerInput);
+    // ~5MB of chatty JSONL garbage in 64KB chunks, then the report, then close.
+    const chunk = 'junkline '.repeat(11_185); // 64KB
+    for (let i = 0; i < 80; i++) child.stdout.emit('data', Buffer.from(chunk)); // 5MB
+    child.stdout.emit(
+      'data',
+      Buffer.from(
+        '\n' + JSON.stringify({
+          type: 'message_end',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'OBSERVATIONS\n- [P1] survived\nEND_OBSERVATIONS' }] },
+        }),
+      ),
+    );
+    child.emit('close', 0);
+    const res = await p;
+    // The report lives in the TAIL of the stream → survives the cap.
+    expect(res.ok).toBe(true);
+    expect(res.observations).toEqual([{ text: 'survived', priority: 'important' }]);
   });
 
   it('on timeout: falls back to direct child kill when the group kill fails', async () => {
@@ -122,5 +160,19 @@ describe('worker kill semantics (n1/n2)', () => {
     if (process.platform !== 'win32') {
       expect(killSpy).toHaveBeenCalledWith(-9999, 'SIGKILL');
     }
+  });
+});
+
+describe('A9: appendCapped', () => {
+  it('bounds the buffer at the cap and keeps the tail (5MB streamed)', () => {
+    let s = '';
+    const chunk = 'a'.repeat(64 * 1024);
+    for (let i = 0; i < 80; i++) s = appendCapped(s, chunk, MAX_STDOUT_CHARS); // 5MB
+    expect(s.length).toBe(MAX_STDOUT_CHARS);
+    expect(s.endsWith(chunk)).toBe(true);
+  });
+
+  it('is a no-op below the cap', () => {
+    expect(appendCapped('abc', 'de', MAX_STDOUT_CHARS)).toBe('abcde');
   });
 });

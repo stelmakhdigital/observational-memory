@@ -149,3 +149,35 @@ describe('scoped file tools', () => {
     expect(none.text).toBe('(no matches)');
   });
 });
+
+describe('A15: byte-capped reads (readCapped)', () => {
+  // '€' is 3 bytes in utf8: 33_334 × 3 = 100_002 bytes > 100_000 cap, and the
+  // cap lands INSIDE the last character (33_333 full chars = 99_999 bytes).
+  const BIG = '€'.repeat(33_334);
+
+  it('read truncates at MAX_READ_BYTES BYTES and is multibyte-safe at the boundary', async () => {
+    writeFileSync(path.join(dir, 'big.md'), BIG);
+    const r = await call('read', { path: 'big.md' });
+    expect(r.isError).toBeFalsy();
+    expect(r.text).toContain('[truncated: file exceeds 100000 bytes]');
+    const kept = r.text.slice(0, r.text.indexOf('\n[truncated'));
+    // Exactly 33_333 full chars + U+FFFD for the dangling byte — no crash,
+    // no mis-decoding of the multibyte tail.
+    expect(kept).toBe('€'.repeat(33_333) + '\uFFFD');
+  });
+
+  it('read of a small file is untouched (no truncation marker)', async () => {
+    writeFileSync(path.join(dir, 'small.md'), 'ok ' + '€'.repeat(100));
+    const r = await call('read', { path: 'small.md' });
+    expect(r.isError).toBeFalsy();
+    expect(r.text).not.toContain('[truncated');
+  });
+
+  it('grep on a single file above the cap is capped, not uncapped', async () => {
+    writeFileSync(path.join(dir, 'big.txt'), 'hit\n'.repeat(40_000)); // 160KB > cap
+    const r = await call('grep', { pattern: 'hit', path: 'big.txt' });
+    expect(r.isError).toBeFalsy();
+    expect(r.text).toContain('big.txt:1: hit');
+    expect(r.text.split('\n').length).toBeLessThanOrEqual(100); // match cap
+  });
+});

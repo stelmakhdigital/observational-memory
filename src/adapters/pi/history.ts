@@ -120,9 +120,20 @@ export class PiHistorySource implements HistorySource {
     return out;
   }
 
+  /** A13: watermarks usually point near the branch TAIL — search last 50. */
+  private static readonly TAIL_SEARCH = 50;
+
   private indexAfter(sinceId: string): number {
     if (sinceId === '') return 0;
     const msgs = this.messages();
+    // A13: fast path — scan from the end (watermark = end of the newest
+    // covered chunk; ids are usually found within the last k messages).
+    const k = Math.min(PiHistorySource.TAIL_SEARCH, msgs.length);
+    for (let i = msgs.length - 1; i >= msgs.length - k; i--) {
+      if (msgs[i]!.id === sinceId) return i + 1;
+    }
+    // Slow path — older watermark (long session) or unknown id (/tree
+    // rollback): full pass, keep the LAST match as before.
     let idx = -1;
     for (let i = 0; i < msgs.length; i++) {
       if (msgs[i]!.id === sinceId) idx = i;
