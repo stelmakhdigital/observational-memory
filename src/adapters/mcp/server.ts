@@ -41,7 +41,7 @@
  * search implementation.
  */
 import { createInterface } from 'node:readline';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -169,6 +169,83 @@ function initState(): McpState {
   };
 }
 
+// A7: lazy init + module state cache. initState() scans up to 50 pi-session
+// files (5 MB tail each) and fully parses the chosen ledger — tens of ms per
+// call. Cache the result; invalidate on: (a) initialize / notifications/initialized
+// (new client session), (b) the ledger source file changed on disk (mtime/size —
+// a live pi writes the session file, so fresh entries must show up; file
+// deleted → re-init → fallback), (c) any relevant env var changed (env snapshot).
+// The statSync freshness check is cheap enough to run on every tools/call.
+const STATE_ENV_KEYS = [
+  'OM_MCP_ROOT',
+  'OM_MCP_SESSION',
+  'OM_MCP_SHARED',
+  'OM_MCP_PI_SESSION',
+  'OM_MCP_PI_SESSIONS_DIR',
+] as const;
+
+function envSnapshot(): string {
+  return STATE_ENV_KEYS.map((k) => process.env[k] ?? '\u0000').join('\u0001');
+}
+
+/** mtime/size fingerprint of the ledger source; null when the file is absent. */
+function sourceFingerprint(file: string): { mtimeMs: number; size: number } | null {
+  try {
+    const st = statSync(file);
+    return { mtimeMs: st.mtimeMs, size: st.size };
+  } catch {
+    return null;
+  }
+}
+
+interface CachedState {
+  state: McpState;
+  env: string;
+  sourceFile: string;
+  fingerprint: { mtimeMs: number; size: number } | null;
+}
+
+let stateCache: CachedState | null = null;
+let stateInits = 0;
+
+/** A7 test hooks: reset the cache / count initState() runs. */
+export function __mcpResetState(): void {
+  stateCache = null;
+  stateInits = 0;
+}
+export function __mcpStateInitCount(): number {
+  return stateInits;
+}
+
+export function invalidateMcpState(): void {
+  stateCache = null;
+}
+
+function getState(): McpState {
+  if (stateCache) {
+    if (envSnapshot() === stateCache.env) {
+      const fp = sourceFingerprint(stateCache.sourceFile);
+      const same =
+        (fp === null && stateCache.fingerprint === null) ||
+        (fp !== null &&
+          stateCache.fingerprint !== null &&
+          fp.mtimeMs === stateCache.fingerprint.mtimeMs &&
+          fp.size === stateCache.fingerprint.size);
+      if (same) return stateCache.state; // fresh
+    }
+    stateCache = null; // env or source changed (or source vanished) → re-init
+  }
+  stateInits++;
+  const state = initState();
+  stateCache = {
+    state,
+    env: envSnapshot(),
+    sourceFile: state.ledgerFile,
+    fingerprint: sourceFingerprint(state.ledgerFile),
+  };
+  return state;
+}
+
 function toolStatus(s: McpState): ToolResult {
   // A16: one ledger read, local filters — embedded stores re-read the whole
   // file per read(type) call, and 5 calls here was pure waste.
@@ -251,7 +328,11 @@ interface JsonRpcRequest {
  */
 export function handleMcpRequest(req: JsonRpcRequest): unknown | null {
   // A11: JSON-RPC/MCP notifications expect NO reply (writing one confuses clients).
-  if (req.method?.startsWith('notifications/')) return null;
+  if (req.method?.startsWith('notifications/')) {
+    // A7: notifications/initialized marks a new client session → drop the cache.
+    if (req.method === 'notifications/initialized') invalidateMcpState();
+    return null;
+  }
   const id = req.id ?? null;
   const fail = (code: number, message: string) => ({
     jsonrpc: '2.0',
@@ -259,6 +340,7 @@ export function handleMcpRequest(req: JsonRpcRequest): unknown | null {
     error: { code, message },
   });
   if (req.method === 'initialize') {
+    invalidateMcpState(); // A7: new client session → fresh state
     return {
       jsonrpc: '2.0',
       id,
@@ -277,7 +359,7 @@ export function handleMcpRequest(req: JsonRpcRequest): unknown | null {
     const name = String(req.params?.name ?? '');
     const args = (req.params?.arguments ?? {}) as Record<string, unknown>;
     try {
-      const s = initState();
+      const s = getState();
       const result: ToolResult =
         name === 'om_status'
           ? toolStatus(s)

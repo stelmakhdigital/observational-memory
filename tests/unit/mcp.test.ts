@@ -1,8 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { handleMcpRequest } from '../../src/adapters/mcp/server.js';
+import {
+  handleMcpRequest,
+  __mcpResetState,
+  __mcpStateInitCount,
+} from '../../src/adapters/mcp/server.js';
+import * as piLedgerModule from '../../src/adapters/mcp/pi-ledger.js';
 import { MemoryStore } from '../../src/core/memory-store.js';
 import { renderTopicFile } from '../fixtures/mocks.js';
 import { FileLedgerStore, defaultLedgerFile } from '../../src/core/ledger/file-store.js';
@@ -179,6 +184,101 @@ describe('MCP server (v0.7)', () => {
       }) as { result: { isError?: boolean; content: Array<{ text: string }> } };
       expect(res.result.isError).toBe(true);
       expect(res.result.content[0]!.text).toContain('unknown tool');
+    });
+  });
+
+  describe('A7: lazy init + state cache', () => {
+    let piFile: string;
+
+    const header = JSON.stringify({
+      type: 'session',
+      version: 3,
+      id: S,
+      timestamp: '2026-01-05T00:00:00Z',
+      cwd: '/x',
+    });
+
+    const obsLine = (n: number) =>
+      JSON.stringify({
+        type: 'custom',
+        customType: 'om',
+        data: {
+          type: 'om.observation',
+          data: {
+            id: `om-20260105000000-0${n}`,
+            coversUpToId: `m${n}`,
+            content: n === 1 ? 'first observation about sockets' : 'second observation about sockets',
+            tokenCount: 10,
+            createdAt: `2026-01-05T00:00:0${n}Z`,
+            sourceRange: { fromId: `m${n - 1}`, toId: `m${n}` },
+          },
+          at: `2026-01-05T00:00:0${n}Z`,
+        },
+        timestamp: `2026-01-05T00:00:0${n}Z`,
+      });
+
+    const writePiSession = (entries: number) =>
+      writeFileSync(piFile, [header, ...Array.from({ length: entries }, (_, i) => obsLine(i + 1))].join('\n') + '\n');
+
+    beforeEach(() => {
+      __mcpResetState();
+      piFile = path.join(dir, 'sess.jsonl');
+      writePiSession(1);
+      process.env.OM_MCP_ROOT = dir;
+      process.env.OM_MCP_SESSION = S;
+      process.env.OM_MCP_PI_SESSION = piFile;
+      process.env.OM_MCP_PI_SESSIONS_DIR = path.join(dir, 'no-sessions');
+    });
+
+    afterEach(() => __mcpResetState());
+
+    it('5 tool-calls in a row → initState once, ledger parsed once', () => {
+      const spy = vi.spyOn(piLedgerModule, 'readPiLedger');
+      for (let i = 0; i < 5; i++) expect(call('om_status')).toContain('active observations: 1');
+      expect(__mcpStateInitCount()).toBe(1);
+      expect(spy).toHaveBeenCalledTimes(1);
+      spy.mockRestore();
+    });
+
+    it('source file mtime/size changed → re-init with fresh data', () => {
+      expect(call('om_status')).toContain('active observations: 1');
+      // live pi appends to the session file: a NEW observation appears
+      writePiSession(2);
+      const text = call('om_status');
+      expect(text).toContain('active observations: 2');
+      expect(__mcpStateInitCount()).toBe(2);
+    });
+
+    it('source file deleted → re-init → embedded fallback', () => {
+      expect(call('om_status')).toContain('source: pi-session');
+      rmSync(piFile);
+      const text = call('om_status');
+      expect(text).toContain('source: embedded');
+      expect(__mcpStateInitCount()).toBe(2);
+    });
+
+    it('initialize and notifications/initialized reset the cache', () => {
+      expect(call('om_status')).toContain('active observations: 1');
+      expect(__mcpStateInitCount()).toBe(1);
+      // new client session → the next tools/call must re-init
+      handleMcpRequest({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+      call('om_status');
+      expect(__mcpStateInitCount()).toBe(2);
+      // and the notification form of the same event too
+      expect(handleMcpRequest({ jsonrpc: '2.0', method: 'notifications/initialized' })).toBeNull();
+      call('om_status');
+      expect(__mcpStateInitCount()).toBe(3);
+    });
+
+    it('env change (OM_MCP_PI_SESSION) invalidates the cache', () => {
+      expect(call('om_status')).toContain('active observations: 1');
+      const other = path.join(dir, 'sess2.jsonl');
+      writeFileSync(other, [header, obsLine(1), obsLine(2), obsLine(3)].join('\n') + '\n');
+      process.env.OM_MCP_PI_SESSION = other;
+      const text = call('om_status');
+      expect(text).toContain('active observations: 3');
+      expect(text).toContain(other);
+      expect(__mcpStateInitCount()).toBe(2);
     });
   });
 });
