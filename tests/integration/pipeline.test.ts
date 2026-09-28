@@ -18,7 +18,7 @@ import type {
   WorkerInput,
   WorkerResult,
 } from '../../src/core/types.js';
-import { MockHistory, MockLedger, MockRunner, drafts } from '../fixtures/mocks.js';
+import { MockHistory, MockLedger, MockRunner, drafts, observerRun, consolidatorRun, settleOrch } from '../fixtures/mocks.js';
 
 const baseConfig: OmConfig = resolveConfig({
   chunkTokens: 10,
@@ -29,34 +29,11 @@ const baseConfig: OmConfig = resolveConfig({
 });
 
 function makeRunner() {
-  const runner = new MockRunner(
-    {
-      // two observations per chunk, content unique to the chunk boundary
-      result: (input: WorkerInput) => ({
-        runId: input.runId,
-        ok: true,
-        costUsd: 0.01,
-        observations: drafts(
-          `obs from ${input.chunk!.coversUpToId}`,
-          `obs2 of chunk ${input.chunk!.coversUpToId}`,
-        ),
-      }),
-    },
-    {
-      result: (input: WorkerInput) => ({
-        runId: input.runId,
-        ok: true,
-        costUsd: 0.02,
-        consolidation: {
-          topics: ['topic-a.md'],
-          tombstoneIds: input.pool!.observations.map((o) => o.id),
-          droppedIds: [],
-          journeyChanged: true,
-        },
-      }),
-    },
+  return new MockRunner(
+    // two observations per chunk, content unique to the chunk boundary
+    observerRun({ costUsd: 0.01, extra: true }),
+    consolidatorRun({ costUsd: 0.02, topics: ['topic-a.md'], tombstoneAll: true, journeyChanged: true }),
   );
-  return runner;
 }
 
 class CaptureSink implements EventSink {
@@ -110,10 +87,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const settle = async () => {
-  await runner.drain();
-  await orch.shutdown();
-};
+const settle = () => settleOrch(orch, runner);
 
 describe('observer pipeline', () => {
   it('observes chunks into the pool with cost', async () => {

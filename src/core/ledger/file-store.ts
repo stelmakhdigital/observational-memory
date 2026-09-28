@@ -32,7 +32,8 @@
  */
 import { constants as fsc, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, truncateSync, unlinkSync, writeSync } from 'node:fs';
 import path from 'node:path';
-import type { LedgerEntryType, LedgerPayload, LedgerStore, TombstoneReport, TypedLedgerEntry } from '../types.js';
+import type { LedgerEntryType, LedgerStore, TombstoneReport, TypedLedgerEntry } from '../types.js';
+import { parseOmLine } from './payload.js';
 
 export interface FileLedgerStoreOptions {
   /** File path, e.g. <root>/<sessionId>/ledger.jsonl. */
@@ -216,19 +217,9 @@ export class FileLedgerStore implements LedgerStore {
 
   // ---- load / crash-repair / in-memory index -------------------------------------
 
+  /** S3: shared strict validator (payload.ts) — unknown types are corrupt too. */
   private parseLine(line: string): TypedLedgerEntry<LedgerEntryType> | null {
-    try {
-      const e = JSON.parse(line) as { type?: LedgerEntryType; data?: unknown; at?: string; meta?: unknown };
-      if (!e.type || !e.data || !e.at) return null;
-      return {
-        type: e.type,
-        data: e.data as LedgerPayload[LedgerEntryType],
-        at: e.at,
-        meta: e.meta as { runId?: string } | undefined,
-      };
-    } catch {
-      return null;
-    }
+    return parseOmLine(line);
   }
 
   /**

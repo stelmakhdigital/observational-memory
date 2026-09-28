@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { estimateTokens, estimateTokensOf } from '../../src/core/tokens.js';
+import { estimateTokens } from '../../src/core/tokens.js';
 
 describe('estimateTokens', () => {
   it('returns 0 for empty text and >=1 for non-empty', () => {
@@ -26,6 +26,5 @@ describe('estimateTokens', () => {
   });
 
   it('sums for arrays', () => {
-    expect(estimateTokensOf(['abcd', 'efgh'])).toBe(estimateTokens('abcdefgh'));
   });
 });

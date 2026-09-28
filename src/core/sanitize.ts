@@ -33,7 +33,6 @@ const PATTERNS: RegExp[] = [
 ];
 
 export interface SanitizeResult {
-  text: string;
   /** True when the content matched an injection pattern. */
   quarantined: boolean;
   /** The matched pattern source (diagnostics). */
@@ -49,8 +48,8 @@ export interface SanitizeResult {
 export function sanitizeObservation(text: string): SanitizeResult {
   for (const p of PATTERNS) {
     if (p.test(text)) {
-      return { text, quarantined: true, matched: p.source };
+      return { quarantined: true, matched: p.source };
     }
   }
-  return { text, quarantined: false };
+  return { quarantined: false };
 }

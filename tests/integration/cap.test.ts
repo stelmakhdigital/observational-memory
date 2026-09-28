@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { MockHistory, MockLedger, MockRunner, type ScriptedRun } from '../fixtures/mocks.js';
+import { MockHistory, MockLedger, MockRunner, type ScriptedRun, sleep } from '../fixtures/mocks.js';
 import { OmOrchestrator } from '../../src/core/orchestrator.js';
 import { MemoryStore } from '../../src/core/memory-store.js';
 import { resolveConfig } from '../../src/core/config.js';
@@ -58,7 +58,7 @@ beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), 'om-cap-'));
 });
 
-const settle = (ms = 40) => new Promise<void>((r) => setTimeout(r, ms));
+const settle = (ms = 40) => sleep(ms);
 
 function makeSession(
   configOverrides: Partial<typeof base> = {},

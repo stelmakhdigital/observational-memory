@@ -39,11 +39,11 @@ import { fileURLToPath } from 'node:url';
 import {
   buildSessionRecallDocs,
   createOmSession,
-  DemoHistory,
   estimateTokens,
   sumCosts,
   type OmSession,
 } from '../src/core/index.js';
+import { DemoHistory } from '../src/core/testing.js';
 import { PiSubprocessRunner } from '../src/adapters/pi/runner.js';
 
 interface EvalCase {

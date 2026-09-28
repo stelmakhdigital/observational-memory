@@ -47,7 +47,7 @@ describe('FileLedgerStore', () => {
 
   it('tombstone appends an om.tombstone entry', () => {
     const store = new FileLedgerStore({ file });
-    store.tombstone(['om-a', 'om-b'], { topics: ['t.md'], journeyChanged: true, maxCoversUpToId: 'm9', maxSeq: 2 });
+    store.tombstone(['om-a', 'om-b'], { topics: ['t.md'], journeyChanged: true, maxCoversUpToId: 'm9' });
     const t = store.read<'om.tombstone'>('om.tombstone');
     expect(t.length).toBe(1);
     expect(t[0]!.data.observationIds).toEqual(['om-a', 'om-b']);

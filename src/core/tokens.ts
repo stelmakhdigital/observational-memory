@@ -18,26 +18,14 @@ export function estimateTokens(text: string): number {
   let run = 0;
   for (let i = 0; i < text.length; i++) {
     const c = text.charCodeAt(i);
-    const isBoundary =
-      c < 256 && (c < 33 || c > 126) // whitespace/punctuation in ASCII range
-        ? true
-        : false;
     if (c >= 33 && c <= 126) run++;
     else {
       if (run > 12) long += run;
       run = 0;
-      if (isBoundary) continue;
     }
   }
   if (run > 12) long += run;
   // Dense runs estimate at ~2.5 chars/token instead of 4.
   const effective = text.length - long + long * 0.625;
   return Math.max(1, Math.ceil(effective / AVG_CHARS_PER_TOKEN));
-}
-
-/** Estimate tokens of an array of strings (sum). */
-export function estimateTokensOf(parts: readonly string[]): number {
-  let sum = 0;
-  for (const p of parts) sum += estimateTokens(p);
-  return sum;
 }

@@ -4,7 +4,7 @@ import {
   renderPool,
   selectBeforeTail,
 } from '../../src/core/ledger/render.js';
-import { parse, serialize } from '../../src/core/ledger/serialize.js';
+import { omPayloadOk, parseOmLine } from '../../src/core/ledger/payload.js';
 import type { Observation } from '../../src/core/types.js';
 
 const obs = (id: string, coversUpToId: string, content = `c-${id}`): Observation => ({
@@ -101,37 +101,33 @@ describe('renderCompactionBlock', () => {
   });
 });
 
-describe('serialize', () => {
-  it('round-trips a valid observation', () => {
-    const o: Observation = {
+describe('payload validation (S3: single validator)', () => {
+  it('accepts a valid observation payload', () => {
+    const o = {
       id: 'om-1',
       coversUpToId: 'm1',
       content: 'hi',
       tokenCount: 3,
       createdAt: '2025-09-21T00:00:00Z',
     };
-    const raw = serialize('om.observation', o);
-    const back = parse('om.observation', raw);
-    expect(back).toEqual(o);
+    expect(omPayloadOk('om.observation', o)).toBe(true);
+    const line = JSON.stringify({ type: 'om.observation', data: o, at: 't' });
+    expect(parseOmLine(line)?.data).toEqual(o);
   });
 
-  it('returns null (not throw) for corrupt payloads', () => {
-    const warns: string[] = [];
-    const warn = (m: string) => warns.push(m);
-    expect(parse('om.observation', 'not json', warn)).toBeNull();
-    expect(parse('om.observation', JSON.stringify({ v: 99, data: {} }), warn)).toBeNull();
-    expect(
-      parse(
-        'om.observation',
-        JSON.stringify({ v: 1, data: { id: 'x' } }), // missing fields
-        warn,
-      ),
-    ).toBeNull();
-    expect(warns.length).toBe(2); // missing-field validation warns silently (by design)
+  it('rejects corrupt payloads (not throw)', () => {
+    expect(omPayloadOk('om.observation', { id: 'x' })).toBe(false); // missing fields
+    expect(omPayloadOk('om.observation', null)).toBe(false);
+    expect(parseOmLine('not json')).toBeNull();
+    expect(parseOmLine(JSON.stringify({ type: 'om.unknown', data: {}, at: 't' }))).toBeNull();
+    expect(parseOmLine(JSON.stringify({ type: 'om.enabled', data: { enabled: true } }))).toBeNull(); // no `at`
   });
 
-  it('round-trips a tombstone', () => {
+  it('round-trips a tombstone line', () => {
     const d = { observationIds: ['om-1'], topics: ['a'], journeyChanged: true };
-    expect(parse('om.tombstone', serialize('om.tombstone', d))).toEqual(d);
+    const line = JSON.stringify({ type: 'om.tombstone', data: d, at: 't', meta: { runId: 'r1' } });
+    const e = parseOmLine(line);
+    expect(e?.data).toEqual(d);
+    expect(e?.meta).toEqual({ runId: 'r1' });
   });
 });

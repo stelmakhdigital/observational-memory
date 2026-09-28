@@ -99,12 +99,12 @@ describe('PiHistorySource', () => {
   it('nextChunk respects the watermark', () => {
     // since e2: fresh = e3+e4 = 2*T2 = 8 ≥ budget (T1+T2 = 7) →
     // e3 alone (4) < 7, e3+e4 (8) ≥ 7 → boundary e4
-    const c2 = src.nextChunk({ coversUpToId: 'e2', observedTokens: T1 });
+    const c2 = src.nextChunk({ coversUpToId: 'e2'});
     expect(c2?.coversUpToId).toBe('e4');
     // since e3: fresh = T2 (4) < budget (7) → null
-    expect(src.nextChunk({ coversUpToId: 'e3', observedTokens: T1 + T2 })).toBeNull();
+    expect(src.nextChunk({ coversUpToId: 'e3'})).toBeNull();
     // from the start: e1+e2 = T1+T2 = 7 ≥ budget → boundary e2
-    const c3 = src.nextChunk({ coversUpToId: '', observedTokens: 0 });
+    const c3 = src.nextChunk({ coversUpToId: ''});
     expect(c3?.coversUpToId).toBe('e2');
   });
 
@@ -192,11 +192,11 @@ describe('PiHistorySource', () => {
 
     it('dead-branch messages do not enter chunks or the tail', () => {
       // budget T1+T2: first chunk = b1+b2 (boundary b2), nothing after that
-      const first = srcB.nextChunk({ coversUpToId: '', observedTokens: 0 });
+      const first = srcB.nextChunk({ coversUpToId: ''});
       expect(first).not.toBeNull();
       expect(first!.coversUpToId).toBe('b2');
       expect(first!.text).not.toContain('DEAD BRANCH TEXT');
-      const second = srcB.nextChunk({ coversUpToId: 'b2', observedTokens: T1 });
+      const second = srcB.nextChunk({ coversUpToId: 'b2'});
       expect(second).toBeNull(); // nothing beyond the branch leaf
       expect(srcB.tailVerbatim('', 10 * T2)).not.toContain('DEAD BRANCH TEXT');
       expect(srcB.tailVerbatim('unknown', 10 * T2)).not.toContain('DEAD BRANCH TEXT');
@@ -219,7 +219,7 @@ describe('PiHistorySource', () => {
       expect(srcB.unobservedTokens('b4')).toBe(T1 + 2 * T2);
       expect(srcB.tailStartIdFor(10 * T2)).toBe('');
       // n9 precondition: re-observe from scratch picks up the whole branch
-      const chunk = srcB.nextChunk({ coversUpToId: 'b4', observedTokens: 0 });
+      const chunk = srcB.nextChunk({ coversUpToId: 'b4'});
       expect(chunk).not.toBeNull();
       expect(chunk!.fromId).toBe('b1');
       expect(chunk!.text).not.toContain('DEAD BRANCH TEXT');

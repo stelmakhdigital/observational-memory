@@ -180,7 +180,7 @@ import { createOmSession } from '@stelmakhdigital/observational-memory/core';
         "description": "The CURRENT state of the work..." }
     ],
     "priority": { "enabled": true },   // v0.4: priority-метки наблюдений (P0/P1/P2)
-    "compaction": { "inject": "full", "topKBudgetTokens": 20000 }, // "full" | "topK" (оба режима ограничены maxCompactBlockTokens)
+    "compaction": { "inject": "full" }, // "full" | "topK" (оба режима ограничены maxCompactBlockTokens)
     "reflector": { "enabled": true, "idleMs": 1800000, "minIntervalMs": 21600000 },
     "shared": { "enabled": true },     // v0.4: project-level темы <root>/shared (read-only)
     "attachments": "auto",             // "auto" (плейсхолдеры [image: name]) | "off"

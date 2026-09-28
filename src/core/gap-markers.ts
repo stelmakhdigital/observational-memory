@@ -3,7 +3,6 @@
  * deterministic (model-free) temporal anchor visible to the observer.
  * See ARCHITECTURE.md §4.6.
  */
-import { newRunId } from './ids.js';
 
 export interface GapMarkerOptions {
   enabled: boolean;
@@ -81,6 +80,3 @@ export function gapMarkerId(now: Date, seq: number): string {
   const p = (n: number) => String(n).padStart(2, '0');
   return `gap-${now.toISOString().replace(/[-:]/g, '').slice(0, 14)}-${seq + 1}`;
 }
-
-/** Re-export for callers that only need run ids. */
-export { newRunId };

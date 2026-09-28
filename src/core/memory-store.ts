@@ -244,16 +244,6 @@ export function parseFrontMatter(content: string): Record<string, string> {
   return out;
 }
 
-/** Build topic file content with front-matter. Deterministic. */
-export function renderTopicFile(
-  topic: string,
-  description: string,
-  session: string,
-  body: string,
-): string {
-  return `---\ntopic: ${topic}\ndescription: ${description}\nsession: ${session}\n---\n\n${body.trim()}\n`;
-}
-
 /** Render the memory-map section of a compaction block from topic summaries. */
 export function renderMemoryMap(topics: readonly TopicSummary[]): string {
   if (topics.length === 0) return '';

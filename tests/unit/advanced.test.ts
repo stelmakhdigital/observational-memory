@@ -234,9 +234,14 @@ describe('FileLedgerStore crash-durability lock (v0.6)', () => {
 
 describe('config v0.4+ invariants', () => {
   it('rejects bad compaction/reflector settings', () => {
-    expect(() => resolveConfig({ compaction: { inject: 'weird' as never, topKBudgetTokens: 100 } })).toThrow();
+    expect(() => resolveConfig({ compaction: { inject: 'weird' as never } })).toThrow();
     expect(() => resolveConfig({ reflector: { enabled: true, idleMs: 0, minIntervalMs: 1000 } })).toThrow();
-    expect(() => resolveConfig({ compaction: { inject: 'topK', topKBudgetTokens: 0 } })).toThrow();
+  });
+
+  it('accepts topK injection (S7: the budget is maxCompactBlockTokens)', () => {
+    const c = resolveConfig({ compaction: { inject: 'topK' } });
+    expect(c.compaction).toEqual({ inject: 'topK' });
+    expect(c.maxCompactBlockTokens).toBeGreaterThan(0);
   });
 
   it('accepts the new defaults', () => {

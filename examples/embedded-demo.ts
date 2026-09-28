@@ -34,7 +34,7 @@ class DemoHistory implements HistorySource {
   add(id: string, text: string): void {
     this.messages.push({ id, text, tokens: estimateTokens(text) });
   }
-  nextChunk(since: { coversUpToId: string; observedTokens: number }) {
+  nextChunk(since: { coversUpToId: string }) {
     return this.chunker.next(this.messages, since);
   }
   currentTokens(): number {

@@ -6,9 +6,9 @@ import {
   MemoryStore,
   parseFrontMatter,
   renderMemoryMap,
-  renderTopicFile,
   sanitizeName,
 } from '../../src/core/memory-store.js';
+import { renderTopicFile } from '../fixtures/mocks.js';
 
 let dir: string;
 beforeEach(() => {

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { foldPool, oldestAbove } from '../../src/core/ledger/pool.js';
-import { compareObsIds, progressOf } from '../../src/core/ledger/progress.js';
-import { nextObsSeqAt } from '../../src/core/ids.js';
+import { progressOf } from '../../src/core/ledger/progress.js';
 import type { Observation, TypedLedgerEntry } from '../../src/core/types.js';
 
 const obs = (id: string, coversUpToId: string, tokenCount = 10): Observation => ({
@@ -127,13 +126,6 @@ describe('oldestAbove', () => {
 });
 
 describe('progress', () => {
-  it('compareObsIds orders by (seq, time); malformed sort after well-formed', () => {
-    expect(compareObsIds('om-20250921000000-1', 'om-20250921000000-2')).toBeLessThan(0);
-    // same seq, later second sorts later
-    expect(compareObsIds('om-20250921000001-1', 'om-20250921000000-1')).toBeGreaterThan(0);
-    expect(compareObsIds('zzz', 'om-20250921000000-1')).toBeGreaterThan(0); // malformed sorts last
-  });
-
   it('watermark = max coversUpToId, out-of-order safe', () => {
     const a = obs('om-20250921000000-1', 'm1');
     const b = obs('om-20250921000000-3', 'm5'); // older slice, committed late
@@ -141,22 +133,11 @@ describe('progress', () => {
     // late older chunk (b) must not regress the watermark below m5
     const p = progressOf([a, c], [b]);
     expect(p.coversUpToId).toBe('m5');
-    expect(p.maxSeq).toBe(3);
   });
 
   it('watermark survives tombstones (consolidated history is still processed)', () => {
     const a = obs('om-20250921000000-1', 'm1');
     const p = progressOf([], [a]);
     expect(p.coversUpToId).toBe('m1'); // watermark is the MESSAGE id
-    expect(p.maxSeq).toBe(1);
-  });
-});
-
-describe('nextObsSeqAt', () => {
-  it('scopes seq to the second', () => {
-    const committed = ['om-20250921000000-1', 'om-20250921000000-3', 'om-20250921000001-7'];
-    expect(nextObsSeqAt(committed, '20250921000000')).toBe(3);
-    expect(nextObsSeqAt(committed, '20250921000001')).toBe(7);
-    expect(nextObsSeqAt(committed, '20250921000002')).toBe(0); // new second
   });
 });

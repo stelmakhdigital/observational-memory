@@ -93,8 +93,6 @@ export interface TombstoneReport {
   journeyChanged: boolean;
   /** Watermark preserved: max coversUpToId among tombstoned observations. */
   maxCoversUpToId?: string;
-  /** Highest observation-id seq among tombstoned observations. */
-  maxSeq?: number;
 }
 
 export interface CostEntry {
@@ -240,8 +238,6 @@ export interface WorkerResult {
 export interface Watermark {
   /** Max coversUpToId committed so far; '' when none. */
   coversUpToId: string;
-  /** Approximate tokens of history already observed. */
-  observedTokens: number;
 }
 
 /** LLM invocation seam. Implementations: PiSubprocessRunner, MockRunner (tests). */
@@ -350,11 +346,8 @@ export class OmError extends Error {
     message: string,
     readonly code:
       | 'config-invalid'
-      | 'ledger-corrupt'
       | 'runner-failed'
       | 'commit-failed'
-      | 'storage-error'
-      | 'not-enabled'
       | 'invalid-since'
       | 'invalid-until',
   ) {

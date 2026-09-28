@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { handleMcpRequest } from '../../src/adapters/mcp/server.js';
-import { MemoryStore, renderTopicFile } from '../../src/core/memory-store.js';
+import { MemoryStore } from '../../src/core/memory-store.js';
+import { renderTopicFile } from '../fixtures/mocks.js';
 import { FileLedgerStore, defaultLedgerFile } from '../../src/core/ledger/file-store.js';
 
 let dir: string;

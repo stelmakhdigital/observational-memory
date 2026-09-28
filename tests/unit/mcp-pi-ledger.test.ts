@@ -86,7 +86,7 @@ describe('readPiLedger (pi session JSONL parse)', () => {
     expect(readPiSessionId(file)).toBe('abc-123');
     expect(readPiSessionId(path.join(dir, 'nope.jsonl'))).toBeNull();
     const headless = path.join(dir, 'headless.jsonl');
-    writeFileSync(headless, omLine({ type: 'om.observation', data: { id: 'o', coversUpToId: 'm', content: 'x', tokenCount: 1 } }) + '\n');
+    writeFileSync(headless, omLine({ type: 'om.observation', data: { id: 'o', coversUpToId: 'm', content: 'x', tokenCount: 1, createdAt: 't' } }) + '\n');
     expect(readPiSessionId(headless)).toBeNull();
   });
 
@@ -97,15 +97,15 @@ describe('readPiLedger (pi session JSONL parse)', () => {
     expect(readPiLedger(file, 'other')).toBeNull();
     // headerless file with om entries: id cannot be verified → rejected when asked
     const headless = path.join(dir, 'headless.jsonl');
-    writeFileSync(headless, omLine({ type: 'om.observation', data: { id: 'o', coversUpToId: 'm', content: 'x', tokenCount: 1 } }) + '\n');
+    writeFileSync(headless, omLine({ type: 'om.observation', data: { id: 'o', coversUpToId: 'm', content: 'x', tokenCount: 1, createdAt: 't' } }) + '\n');
     expect(readPiLedger(headless)!.omEntries).toBe(1);
     expect(readPiLedger(headless, 'any-id')).toBeNull();
   });
 
   it('reads the TAIL: om entries after >READ_BYTES of padding are found, head entries are not (A2)', () => {
     const file = path.join(dir, 'big.jsonl');
-    const headObs = omLine({ type: 'om.observation', data: { id: 'om-head', coversUpToId: 'm0', content: 'old head observation', tokenCount: 4 } });
-    const tailObs = omLine({ type: 'om.observation', data: { id: 'om-tail', coversUpToId: 'm9', content: 'fresh tail observation', tokenCount: 5 } });
+    const headObs = omLine({ type: 'om.observation', data: { id: 'om-head', coversUpToId: 'm0', content: 'old head observation', tokenCount: 4, createdAt: 't' } });
+    const tailObs = omLine({ type: 'om.observation', data: { id: 'om-tail', coversUpToId: 'm9', content: 'fresh tail observation', tokenCount: 5, createdAt: 't' } });
     const pad = Buffer.alloc(26 * 1024 * 1024, 0x78); // >READ_BYTES (25 МБ) of 'x'
     // file = header + head obs + 26MB pad + tail obs → head obs is outside the 25MB tail window
     const fd = openSync(file, 'w');

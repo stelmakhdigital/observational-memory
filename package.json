@@ -16,6 +16,10 @@
       "types": "./dist/core/index.d.ts",
       "default": "./dist/core/index.js"
     },
+    "./core/testing": {
+      "types": "./dist/core/testing.d.ts",
+      "default": "./dist/core/testing.js"
+    },
     "./adapters/pi": {
       "types": "./dist/adapters/pi/index.d.ts",
       "default": "./dist/adapters/pi/index.js"

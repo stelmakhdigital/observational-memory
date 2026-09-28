@@ -31,6 +31,7 @@ describe('pi package packaging (git install)', () => {
 describe('npm packaging (dist build, P2.12)', () => {
   const EXPORTS: Record<string, { types: string; default: string }> = {
     './core': { types: './dist/core/index.d.ts', default: './dist/core/index.js' },
+    './core/testing': { types: './dist/core/testing.d.ts', default: './dist/core/testing.js' },
     './adapters/pi': { types: './dist/adapters/pi/index.d.ts', default: './dist/adapters/pi/index.js' },
     './adapters/mcp': { types: './dist/adapters/mcp/server.d.ts', default: './dist/adapters/mcp/server.js' },
   };

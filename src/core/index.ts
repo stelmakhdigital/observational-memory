@@ -21,4 +21,8 @@ export { renderObserverPrompt } from './prompts/observer.js';
 export { renderConsolidatorPrompt } from './prompts/consolidator.js';
 export { renderExtractorPrompt } from './prompts/extractor.js';
 export { renderReflectPrompt } from './prompts/reflector.js';
-export { DemoHistory, type DemoHistoryOptions } from './testing.js';
+
+/**
+ * Demo/testing utilities (DemoHistory) live in the `./core/testing` subpath:
+ * they are fixtures, not the production API.
+ */

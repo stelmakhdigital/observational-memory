@@ -21,28 +21,28 @@ describe('MessageChunker.next', () => {
       ['c', 'cccc'], // 4
     );
     // full threshold: 10 -> all three messages (4+4 < 10)
-    expect(chunker.next(m, { coversUpToId: '', observedTokens: 0 })?.coversUpToId).toBe('c');
+    expect(chunker.next(m, { coversUpToId: ''})?.coversUpToId).toBe('c');
     // minTokens=4 -> single first message
-    const early = chunker.next(m, { coversUpToId: '', observedTokens: 0 }, { minTokens: 4 });
+    const early = chunker.next(m, { coversUpToId: ''}, { minTokens: 4 });
     expect(early?.coversUpToId).toBe('a');
     expect(early?.tokens).toBe(4);
     // minTokens larger than chunkTokens is clamped to chunkTokens
-    const clamped = chunker.next(m, { coversUpToId: '', observedTokens: 0 }, { minTokens: 100 });
+    const clamped = chunker.next(m, { coversUpToId: ''}, { minTokens: 100 });
     expect(clamped?.coversUpToId).toBe('c');
   });
 
   it('minTokens still returns null when fresh history is empty', () => {
-    expect(chunker.next([], { coversUpToId: '', observedTokens: 0 }, { minTokens: 1 })).toBeNull();
+    expect(chunker.next([], { coversUpToId: ''}, { minTokens: 1 })).toBeNull();
   });
 
   it('returns null when fresh history < chunkTokens', () => {
     const m = msgs(['m1', 'abcd'], ['m2', 'efgh']);
-    expect(chunker.next(m, { coversUpToId: '', observedTokens: 0 })).toBeNull();
+    expect(chunker.next(m, { coversUpToId: ''})).toBeNull();
   });
 
   it('cuts the earliest message boundary reaching chunkTokens', () => {
     const m = msgs(['m1', 'abc'], ['m2', 'defghij'], ['m3', 'jklm']); // 3+7+4
-    const c = chunker.next(m, { coversUpToId: '', observedTokens: 0 })!;
+    const c = chunker.next(m, { coversUpToId: ''})!;
     expect(c.coversUpToId).toBe('m2'); // 3 <10, 3+7=10
     expect(c.text).toBe('abc\ndefghij');
     expect(c.tokens).toBe(10); // per-message sum (3+7)
@@ -50,7 +50,7 @@ describe('MessageChunker.next', () => {
 
   it('includes a trailing small message when the boundary overshoots the budget', () => {
     const m = msgs(['m1', 'abc'], ['m2', 'def'], ['m3', 'ghij']); // 3+3+4
-    const c = chunker.next(m, { coversUpToId: '', observedTokens: 0 })!;
+    const c = chunker.next(m, { coversUpToId: ''})!;
     // 3+3=6 <10 → next boundary is after m3 (total 10); message is never split.
     expect(c.coversUpToId).toBe('m3');
     expect(c.text).toBe('abc\ndef\nghij');
@@ -59,39 +59,39 @@ describe('MessageChunker.next', () => {
 
   it('never splits a message: single oversized message is a whole slice', () => {
     const m = msgs(['m1', 'x'.repeat(30)]);
-    const c = chunker.next(m, { coversUpToId: '', observedTokens: 0 })!;
+    const c = chunker.next(m, { coversUpToId: ''})!;
     expect(c.coversUpToId).toBe('m1');
     expect(c.tokens).toBe(30);
   });
 
   it('resumes from the watermark', () => {
     const m = msgs(['m1', 'abc'], ['m2', 'def'], ['m3', 'ghijkl'], ['m4', 'mnopqrs']); // 3+3+6+7
-    const c = chunker.next(m, { coversUpToId: 'm2', observedTokens: 6 })!;
+    const c = chunker.next(m, { coversUpToId: 'm2'})!;
     expect(c.coversUpToId).toBe('m4'); // 6 <10, 6+7=13
     expect(c.text).toBe('ghijkl\nmnopqrs');
   });
 
   it('returns null when post-watermark history < chunkTokens', () => {
     const m = msgs(['m1', 'abc'], ['m2', 'def'], ['m3', 'ghij']);
-    expect(chunker.next(m, { coversUpToId: 'm2', observedTokens: 6 })).toBeNull(); // 4 < 10
+    expect(chunker.next(m, { coversUpToId: 'm2'})).toBeNull(); // 4 < 10
   });
 
   it('re-observes from the beginning when watermark id is unknown (tree rollback)', () => {
     const m = msgs(['m3', 'ghij'], ['m4', 'mnopqrs']); // 4 + 7 = 11
-    const c = chunker.next(m, { coversUpToId: 'm999', observedTokens: 99 })!;
+    const c = chunker.next(m, { coversUpToId: 'm999'})!;
     expect(c.coversUpToId).toBe('m4');
   });
 
   it('provides overlap context bounded by overlapTokens', () => {
     const m = msgs(['m1', 'abcdef'], ['m2', 'ghijkl'], ['m3', 'mnopqrs']);
-    const c = chunkerOverlap.next(m, { coversUpToId: 'm1', observedTokens: 6 })!;
+    const c = chunkerOverlap.next(m, { coversUpToId: 'm1'})!;
     expect(c.coversUpToId).toBe('m3'); // 6+7=13 >=10
     expect(c.overlapContext).toBe('abcdef'); // tail of pre-slice history, <= 6 tokens
   });
 
   it('has empty overlap when nothing before the slice', () => {
     const m = msgs(['m1', 'abcdef'], ['m2', 'ghijkl']);
-    const c = chunkerOverlap.next(m, { coversUpToId: '', observedTokens: 0 })!;
+    const c = chunkerOverlap.next(m, { coversUpToId: ''})!;
     expect(c.overlapContext).toBe('');
   });
 
@@ -107,7 +107,7 @@ describe('MessageChunker.next', () => {
       ['m3', 'xyzwv'],
       ['m4', 'vwxyzw'],
     );
-    const c = chunkerOverlap.next(m, { coversUpToId: 'm2', observedTokens: 15 })!;
+    const c = chunkerOverlap.next(m, { coversUpToId: 'm2'})!;
     expect(c.coversUpToId).toBe('m4');
     // overlap = only the oversized tail message; messages[0] (m1) excluded
     expect(c.overlapContext).toBe('l'.repeat(12));
@@ -117,7 +117,7 @@ describe('MessageChunker.next', () => {
   it('R1: with a fitting tail, the overlap never grows past the budget', () => {
     // m1, m2 each 5 tokens; overlap 6 → tail m2 fits, m1 would exceed
     const m = msgs(['m1', 'aaaaa'], ['m2', 'bbbbb'], ['m3', 'c'.repeat(10)]);
-    const c = chunkerOverlap.next(m, { coversUpToId: 'm2', observedTokens: 10 })!;
+    const c = chunkerOverlap.next(m, { coversUpToId: 'm2'})!;
     expect(c.overlapContext).toBe('bbbbb');
   });
 });

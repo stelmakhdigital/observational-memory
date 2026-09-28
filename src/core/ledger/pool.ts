@@ -71,10 +71,6 @@ export interface PoolState {
   tombstoned: Map<string, { by: string; at: string }>;
 }
 
-export interface PoolOptions {
-  tombstoneBy?: string; // run id attribution, informational
-}
-
 /**
  * Fold ledger entries into the active pool.
  * @param observations entries of type 'om.observation' (commit order)

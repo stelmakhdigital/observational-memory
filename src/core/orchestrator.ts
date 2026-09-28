@@ -19,7 +19,7 @@ import { estimateTokens } from './tokens.js';
 import { nextObservationId, newRunId } from './ids.js';
 import { sanitizeObservation } from './sanitize.js';
 import { recallSearch, renderRecallHits, buildSessionRecallDocs, type RecallHit, type RecallOptions } from './recall.js';
-import { OmError } from './types.js';
+import { RunManager, type InFlight } from './run-manager.js';
 import type {
   Clock,
   CompactionBlock,
@@ -30,8 +30,6 @@ import type {
   ModelRunner,
   Observation,
   OmStatus,
-  Role,
-  RunInfo,
   WorkerInput,
   WorkerResult,
 } from './types.js';
@@ -77,28 +75,6 @@ export function renderCurrentTask(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
-/**
- * M6: compact rendering of an LLM result for om.lastError — the observations
- * texts verbatim, other roles as capped JSON (nothing important is lost).
- */
-function summarizeWorkerResult(res: WorkerResult): string {
-  if (res.observations && res.observations.length > 0) {
-    return res.observations.map((d) => `- ${d.text}`).join('\n');
-  }
-  const rest: Record<string, unknown> = { ...res };
-  delete rest.runId;
-  delete rest.ok;
-  delete rest.costUsd;
-  delete rest.observations;
-  delete rest.error;
-  try {
-    const s = JSON.stringify(rest) ?? '{}';
-    return s.length > 2000 ? `${s.slice(0, 2000)}…` : s;
-  } catch {
-    return '(unserializable)';
-  }
-}
-
 export interface OrchestratorDeps {
   config: OmConfig;
   sessionId: string;
@@ -113,34 +89,18 @@ export interface OrchestratorDeps {
   log?: (msg: string) => void;
 }
 
-interface InFlight {
-  runId: string;
-  role: Role;
-  startedAt: string;
-  promise: Promise<void>;
-  /** Observer chunk provenance — drain fast path (FR-3.4, see mustWaitFor). */
-  coversUpToId?: string;
-  fromId?: string;
-}
-
 export class OmOrchestrator {
   private readonly cfg: OmConfig;
   private readonly sessionId: string;
   private readonly now: () => Date;
   private readonly log: (m: string) => void;
   private readonly estimate: (t: string) => number = estimateTokens;
+  /** LLM-run lifecycle (S1): execution, retry, bookkeeping, quiescent drain. */
+  private readonly runs: RunManager;
 
   private enabled = false;
   private seeded = false;
-  private inFlight: InFlight[] = [];
   private pendingChunks = new Set<string>();
-  /**
-   * E1 guard: coversUpToId of slices that were attempted but never committed
-   * (worker failed after the retry, or the commit itself failed). The
-   * shutdown final pump skips them — they are re-observed on a later cycle,
-   * not re-run for free LLM cost at shutdown time.
-   */
-  private readonly badSlices = new Set<string>();
   private consolidating = false;
   private extracting = false;
   private lastGapMarkedFor: Date | null = null;
@@ -169,6 +129,14 @@ export class OmOrchestrator {
     this.sessionId = d.sessionId;
     this.now = () => (d.clock ? d.clock.now() : new Date());
     this.log = d.log ?? (() => {});
+    this.runs = new RunManager({
+      ledger: d.ledger,
+      runner: d.runner,
+      sink: d.sink,
+      now: this.now,
+      log: this.log,
+      onStatus: () => this.emitStatus(),
+    });
     // R9: gap-marker dedup must survive host restarts — restore the already
     // marked pause from the ledger (the marker stores the previous message
     // time; older markers without prevAt fall back to their write time).
@@ -275,7 +243,7 @@ export class OmOrchestrator {
     if (this.observersInFlight() >= this.cfg.observerConcurrency) return;
     const wm = this.watermark();
     const chunk = this.d.history.nextChunk(
-      { coversUpToId: wm.coversUpToId, observedTokens: 0 },
+      { coversUpToId: wm.coversUpToId },
       { minTokens: this.cfg.earlyActivation.minUnobservedTokens },
     );
     if (!chunk) return;
@@ -307,26 +275,7 @@ export class OmOrchestrator {
   // ---- observers (FR-1) ---------------------------------------------------
 
   private observersInFlight(): number {
-    return this.inFlight.filter((r) => r.role === 'observer').length;
-  }
-
-  /**
-   * Track a worker task in inFlight; the entry REMOVES ITSELF when settled so
-   * quiescent drains (shutdown/compaction) terminate even for follow-up runs
-   * spawned while draining.
-   */
-  private trackTask(
-    runId: string,
-    role: Role,
-    startedAt: string,
-    task: Promise<void>,
-    extra?: { coversUpToId?: string; fromId?: string },
-  ): void {
-    const tracked = task.finally(() => {
-      const i = this.inFlight.findIndex((r) => r.runId === runId);
-      if (i !== -1) this.inFlight.splice(i, 1);
-    });
-    this.inFlight.push({ runId, role, startedAt, promise: tracked, ...extra });
+    return this.runs.inFlight.filter((r) => r.role === 'observer').length;
   }
 
   private pumpObservers(): void {
@@ -337,7 +286,6 @@ export class OmOrchestrator {
       const wm = this.watermark();
       const chunk = this.d.history.nextChunk({
         coversUpToId: wm.coversUpToId,
-        observedTokens: 0,
       });
       if (!chunk) return;
       // one observer per slice: the watermark moves only after the commit,
@@ -355,18 +303,18 @@ export class OmOrchestrator {
       chunk: { coversUpToId, text, overlapContext, ...(fromId ? { fromId } : {}) },
     };
     this.pendingChunks.add(coversUpToId);
-    const task = this.runWorker(
+    const task = this.runs.runWorker(
       input,
       (res) => this.commitObservations(runId, coversUpToId, fromId, res),
     ).finally(() => {
       this.pendingChunks.delete(coversUpToId);
     });
-    this.trackTask(runId, 'observer', this.now().toISOString(), task, { coversUpToId, fromId });
+    this.runs.trackTask(runId, 'observer', this.now().toISOString(), task, { coversUpToId, fromId });
   }
 
   private commitObservations(runId: string, coversUpToId: string, fromId: string | undefined, res: WorkerResult): void {
     // the slice committed → it is no longer "bad" (E1 shutdown pump may pass it)
-    this.badSlices.delete(coversUpToId);
+    this.runs.clearBadSlice(coversUpToId);
     if (!this.enabled) {
       this.log(`discarding observations of ${runId} (disabled mid-run)`);
       return;
@@ -382,7 +330,7 @@ export class OmOrchestrator {
     // Observation ids can't be matched across attempts (the seq counter
     // advances after every append), so we match by position + text: appends
     // are sequential, one ledger read, the volume is tiny (one chunk).
-    const committed = this.committedForRun(runId);
+    const committed = this.runs.committedForRun(runId);
     for (let i = 0; i < parsed.length; i++) {
       const draft = parsed[i]!;
       const text = (draft?.text ?? '').trim();
@@ -409,15 +357,6 @@ export class OmOrchestrator {
       });
     }
     this.emitStatus();
-  }
-
-  /** R3: texts this run already committed (partial-commit idempotence). */
-  private committedForRun(runId: string): Set<string> {
-    const committed = new Set<string>();
-    for (const e of this.d.ledger.read<'om.observation'>('om.observation')) {
-      if (e.meta?.runId === runId) committed.add(e.data.content);
-    }
-    return committed;
   }
 
   private maxSeqForSecond(): number {
@@ -472,10 +411,24 @@ export class OmOrchestrator {
         sharedTopics: this.sharedTopicsLine(),
       },
     };
-    const task = this.runWorker(input, (res) => this.commitConsolidation(runId, oldest.ids, res));
-    this.trackTask(runId, 'consolidator', this.now().toISOString(),
+    this.startRoleWorker('consolidating', input, (res) => this.commitConsolidation(runId, oldest.ids, res));
+  }
+
+  /**
+   * Common role-worker launch (consolidator/extractor/reflect): flag on →
+   * runWorker + trackTask → flag off + status re-emit when settled. The flags
+   * stay in the orchestrator (domain state); only the launch template is here.
+   */
+  private startRoleWorker(
+    flag: 'consolidating' | 'extracting' | 'reflecting',
+    input: WorkerInput,
+    commit: (res: WorkerResult) => void,
+  ): void {
+    this[flag] = true;
+    const task = this.runs.runWorker(input, commit);
+    this.runs.trackTask(input.runId, input.role, this.now().toISOString(),
       task.finally(() => {
-        this.consolidating = false;
+        this[flag] = false;
         this.emitStatus();
       }),
     );
@@ -512,15 +465,10 @@ export class OmOrchestrator {
         (m, o) => (o.coversUpToId > m ? o.coversUpToId : m),
         '',
       );
-      const maxSeq = tombstonedObs.reduce((m, o) => {
-        const s = /-(\d+)$/.exec(o.id)?.[1];
-        return s && Number(s) > m ? Number(s) : m;
-      }, 0);
       this.d.ledger.tombstone(all, {
         topics: c.topics,
         journeyChanged: c.journeyChanged,
         maxCoversUpToId,
-        maxSeq,
       });
     }
     this.d.memory.renderIndex(this.sessionId);
@@ -547,7 +495,6 @@ export class OmOrchestrator {
           ? [...this.pool().observations].reverse()
           : [];
     if (observations.length === 0) return;
-    this.extracting = true;
     const current: Record<string, unknown> = {};
     for (const spec of this.cfg.extractors) {
       // includePrevious (v0.4, Mastra-style): by default the extractor sees the
@@ -567,7 +514,7 @@ export class OmOrchestrator {
         sessionDir: this.d.memory.sessionDir(this.sessionId),
       },
     };
-    const task = this.runWorker(input, (res) => {
+    this.startRoleWorker('extracting', input, (res) => {
       const values = res.extraction ?? {};
       for (const spec of this.cfg.extractors) {
         if (Object.prototype.hasOwnProperty.call(values, spec.id)) {
@@ -576,12 +523,6 @@ export class OmOrchestrator {
       }
       this.log(`extraction ${runId} (${reason}): saved ${Object.keys(values).length} values`);
     });
-    this.trackTask(runId, 'extractor', this.now().toISOString(),
-      task.finally(() => {
-        this.extracting = false;
-        this.emitStatus();
-      }),
-    );
     this.log(`extraction started (${reason})`);
   }
 
@@ -630,12 +571,12 @@ export class OmOrchestrator {
     const boundary = this.tailBoundaryId();
     let waited = false;
     for (;;) {
-      const wait = this.inFlight.slice().filter((t) => this.mustWaitFor(t, boundary));
+      const wait = this.runs.inFlight.filter((t) => this.mustWaitFor(t, boundary));
       if (wait.length === 0) break;
       waited = true;
       await Promise.allSettled(wait.map((r) => r.promise));
     }
-    this.inFlight = [];
+    this.runs.clearInFlight();
     if (waited) await this.d.runner.drain?.();
     const block = this.compactBlock();
     this.d.sink.onCompactionBlock(block, { shouldResume });
@@ -664,13 +605,9 @@ export class OmOrchestrator {
 
   forceConsolidate(): void {
     if (!this.enabled || this.consolidating) return;
-    this.consolidating = true;
     const pool = this.pool();
     const oldest = oldestAbove(pool, this.cfg.poolTargetTokens);
-    if (oldest.ids.length === 0) {
-      this.consolidating = false;
-      return;
-    }
+    if (oldest.ids.length === 0) return;
     const runId = newRunId();
     const input: WorkerInput = {
       runId,
@@ -682,13 +619,7 @@ export class OmOrchestrator {
         sharedTopics: this.sharedTopicsLine(),
       },
     };
-    const task = this.runWorker(input, (res) => this.commitConsolidation(runId, oldest.ids, res));
-    this.trackTask(runId, 'consolidator', this.now().toISOString(),
-      task.finally(() => {
-        this.consolidating = false;
-        this.emitStatus();
-      }),
-    );
+    this.startRoleWorker('consolidating', input, (res) => this.commitConsolidation(runId, oldest.ids, res));
   }
 
   // ---- reflector (v0.6, sleep-time) -----------------------------------------
@@ -735,7 +666,6 @@ export class OmOrchestrator {
 
   forceReflect(): void {
     if (!this.enabled || this.reflecting) return;
-    this.reflecting = true;
     const topics = this.d.memory.listTopics(this.sessionId).map((t) => t.file);
     const runId = newRunId();
     const input: WorkerInput = {
@@ -748,13 +678,7 @@ export class OmOrchestrator {
         sharedTopics: this.sharedTopicsLine(),
       },
     };
-    const task = this.runWorker(input, (res) => this.commitReflection(runId, res));
-    this.trackTask(runId, 'reflect', this.now().toISOString(),
-      task.finally(() => {
-        this.reflecting = false;
-        this.emitStatus();
-      }),
-    );
+    this.startRoleWorker('reflecting', input, (res) => this.commitReflection(runId, res));
     this.log(`reflect pass started (topics: ${topics.length})`);
   }
 
@@ -780,16 +704,12 @@ export class OmOrchestrator {
     const pool = this.pool();
     const tailBoundaryId = this.tailBoundaryId();
     let observations = selectBeforeTail(pool.observations, tailBoundaryId);
-    // v0.5: deterministic injection modes — topK trims by priority budget.
-    // audit M3: the observations part of the block is ALWAYS capped — for
-    // topK the smaller of the two budgets wins, and 'full' means "the whole
-    // pool, but never more than maxCompactBlockTokens" (class/freshness
-    // selection is the same trimToBudget as topK).
-    const budget = Math.min(
-      this.cfg.maxCompactBlockTokens,
-      this.cfg.compaction.inject === 'topK' ? this.cfg.compaction.topKBudgetTokens : Number.POSITIVE_INFINITY,
-    );
-    observations = trimToBudget(observations, budget);
+    // v0.5: deterministic injection modes; S7: the observations part of the
+    // block is ALWAYS capped by maxCompactBlockTokens in BOTH modes — 'full'
+    // means "the whole pool, but never more than the cap"; 'topK' uses the
+    // same cap as an explicit selection budget (class/freshness selection is
+    // the same trimToBudget).
+    observations = trimToBudget(observations, this.cfg.maxCompactBlockTokens);
     // v0.4: render priority-ordered (critical → important → routine).
     observations = orderByPriority(observations);
     const memoryMap = renderMemoryMap(this.d.memory.listTopics(this.sessionId));
@@ -887,148 +807,31 @@ export class OmOrchestrator {
   private watermark() {
     const obs = this.d.ledger.read<'om.observation'>('om.observation');
     const active = obs.map((e) => e.data);
-    let { coversUpToId, maxSeq } = progressOf(active, []);
+    let { coversUpToId } = progressOf(active, []);
     // Watermark must survive tombstones (FR-1.3): consolidated history is still processed.
     for (const t of this.d.ledger.read<'om.tombstone'>('om.tombstone')) {
       if (t.data.maxCoversUpToId && t.data.maxCoversUpToId > coversUpToId) {
         coversUpToId = t.data.maxCoversUpToId;
       }
-      if (t.data.maxSeq && t.data.maxSeq > maxSeq) maxSeq = t.data.maxSeq;
     }
-    return { coversUpToId, maxSeq };
+    return { coversUpToId };
   }
 
   /**
-   * Quiescent drain: wait until NOTHING is in flight. Follow-up workers
-   * spawned while draining are awaited too (entries remove themselves on
-   * settle, so the loop terminates). Shared by shutdown/drainForCompaction.
-   */
-  private async drainInFlight(): Promise<void> {
-    for (;;) {
-      const inflight = this.inFlight.slice();
-      if (inflight.length === 0) break;
-      await Promise.allSettled(inflight.map((r) => r.promise));
-    }
-    this.inFlight = [];
-  }
-
-  /**
-   * A5: quiescently wait for ALL in-flight workers (observers included) so a
-   * compaction block rendered afterwards is complete. Adapters call this
-   * before rendering (session_before_compact); runCompaction has its own
-   * boundary-aware variant (R5 fast path skips tail-only observers).
+   * A5: quiescently wait for ALL in-flight workers (observed by compaction
+   * rendering). Adapters call this before rendering (session_before_compact);
+   * runCompaction has its own boundary-aware variant (R5 fast path skips
+   * tail-only observers).
    */
   async drainForCompaction(): Promise<void> {
     if (!this.enabled) return;
-    await this.drainInFlight();
+    await this.runs.drainInFlight();
     await this.d.runner.drain?.();
   }
 
   // ---- worker plumbing (NFR-1) ----------------------------------------------
-
-  private runWorker(input: WorkerInput, onSuccess: (res: WorkerResult) => void): Promise<void> {
-    const startedAt = this.now().toISOString();
-    this.d.sink.onRunStarted({ runId: input.runId, role: input.role, startedAt });
-    this.d.ledger.append({
-      type: 'om.run',
-      data: { runId: input.runId, role: input.role, status: 'started', at: startedAt },
-      at: startedAt,
-      meta: { runId: input.runId },
-    });
-    this.emitStatus();
-
-    const attempt = (retriesLeft: number): Promise<void> =>
-      this.d.runner
-        .run(input.role, input)
-        .then((res) => {
-          if (!res.ok) throw new Error(res.error ?? 'worker failed');
-          this.recordRun(input.runId, input.role, 'ok', res.costUsd);
-          // M6: a COMMIT failure is NOT a worker failure. The .catch below
-          // would retry the WHOLE worker — re-running the LLM and paying for it.
-          // Instead the commit is retried once, synchronously, without the LLM.
-          // If the commit ultimately fails: the LLM result is preserved in
-          // om.lastError (data is not lost) and the slice is left UNCOVERED —
-          // the watermark only moves on a successful commit, so the slice is
-          // re-observed on a later cycle; foldPool's sourceRange.fromId dedup
-          // (n9) guards against duplicates from a partially committed attempt.
-          let commitErr: unknown = null;
-          try {
-            onSuccess(res);
-          } catch (e) {
-            commitErr = e;
-            this.log(`commit for ${input.runId} failed, retrying commit once (no LLM re-run)`);
-            try {
-              onSuccess(res);
-              commitErr = null; // retry succeeded
-            } catch (e2) {
-              commitErr = e2;
-            }
-          }
-          if (commitErr !== null) this.handleCommitFailure(input, commitErr, res);
-        })
-        .catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          if (retriesLeft > 0) {
-            this.log(`worker ${input.runId} failed (${msg}), retrying once`);
-            return attempt(retriesLeft - 1);
-          }
-          this.recordRun(input.runId, input.role, 'error', undefined, msg);
-          const badId = input.chunk?.coversUpToId;
-          if (badId) this.badSlices.add(badId); // E1: shutdown must not re-run it
-          const at = this.now().toISOString();
-          this.d.ledger.append({
-            type: 'om.lastError',
-            data: { message: msg, at },
-            at,
-          });
-          this.d.sink.onError(new OmError(msg, 'runner-failed'));
-          this.emitStatus();
-        });
-    return attempt(1);
-  }
-
-  /**
-   * M6: final commit failure. The LLM run was recorded 'ok' (cost is real);
-   * we only record the error with the result payload so nothing is lost.
-   */
-  private handleCommitFailure(input: WorkerInput, err: unknown, res: WorkerResult): void {
-    const msg = err instanceof Error ? err.message : String(err);
-    const badId = input.chunk?.coversUpToId;
-    if (badId) this.badSlices.add(badId); // E1: shutdown must not re-run it
-    const detail = `commit failed (run ${input.runId}, ${input.role}) after 1 commit-retry: ${msg};\nresult: ${summarizeWorkerResult(res)}`;
-    const at = this.now().toISOString();
-    try {
-      this.d.ledger.append({ type: 'om.lastError', data: { message: detail, at }, at });
-      this.d.sink.onError(new OmError(detail, 'commit-failed'));
-    } catch (e) {
-      this.log(`commit-failure recording failed: ${String(e)}`);
-      return;
-    }
-    this.log(detail);
-    this.emitStatus();
-  }
-
-  private recordRun(runId: string, role: Role, status: 'ok' | 'error', costUsd?: number, error?: string): void {
-    const at = this.now().toISOString();
-    this.d.ledger.append({
-      type: 'om.run',
-      data: { runId, role, status, at, ...(error ? { error } : {}) },
-      at,
-      meta: { runId },
-    });
-    // Runs counter (audit, smoke-bug #2): EVERY successful worker run leaves
-    // an om.cost mark — even at $0 (free/local models previously showed
-    // "(0 runs)"). The cost sum is unaffected (0 + 0 = 0).
-    if (status === 'ok') {
-      const usd = typeof costUsd === 'number' && Number.isFinite(costUsd) && costUsd > 0 ? costUsd : 0;
-      this.d.ledger.append({
-        type: 'om.cost',
-        data: { runId, role, usd, at },
-        at,
-        meta: { runId },
-      });
-    }
-  }
+  // runWorker / commit-failure handling / run+cost bookkeeping live in
+  // RunManager (S1) — see run-manager.ts.
 
   // ---- status (FR-7.3) ------------------------------------------------------
 
@@ -1040,7 +843,7 @@ export class OmOrchestrator {
     return {
       enabled: this.enabled,
       passive: this.cfg.passive,
-      inFlight: this.inFlight.map((r) => ({ runId: r.runId, role: r.role, startedAt: r.startedAt })),
+      inFlight: this.runs.inFlight.map((r) => ({ runId: r.runId, role: r.role, startedAt: r.startedAt })),
       activeObservations: pool.observations.length,
       poolTokens: pool.tokens,
       nextObserverInTokens: this.nextObserverProgress(),
@@ -1090,9 +893,9 @@ export class OmOrchestrator {
     this.earlyTimer = null;
     if (this.reflectTimer) clearTimeout(this.reflectTimer);
     this.reflectTimer = null;
-    // Quiescent drain (see drainInFlight): follow-up workers spawned while
-    // draining must be awaited too.
-    await this.drainInFlight();
+    // Quiescent drain (see RunManager.drainInFlight): follow-up workers spawned
+    // while draining must be awaited too.
+    await this.runs.drainInFlight();
     // E1 (tail race): while an observer was in flight the pump saw only that
     // in-flight slice (the watermark does not move until the commit), so a
     // tail of ≥ chunkTokens arriving after the last pump stays unobserved.
@@ -1105,14 +908,13 @@ export class OmOrchestrator {
     if (this.enabled && !this.cfg.passive && this.safeTotalTokens() > this.lastPumpedTotalTokens) {
       const chunk = this.d.history.nextChunk({
         coversUpToId: this.watermark().coversUpToId,
-        observedTokens: 0,
       });
-      if (chunk && !this.badSlices.has(chunk.coversUpToId)) {
+      if (chunk && !this.runs.isBadSlice(chunk.coversUpToId)) {
         this.startObserver(chunk.coversUpToId, chunk.text, chunk.overlapContext, chunk.fromId);
       }
     }
     // Drain the possibly-pumped observer (and any follow-ups it spawned).
-    await this.drainInFlight();
+    await this.runs.drainInFlight();
     await this.d.runner.drain?.();
   }
 

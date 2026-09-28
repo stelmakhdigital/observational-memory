@@ -28,35 +28,8 @@ export const SCAN_FILE_LIMIT = 50;
 /** Hard cap when fully parsing one session file. */
 export const READ_BYTES = 25 * 1024 * 1024;
 
-/** Loose payload shape check (NFR-1: corrupt payloads are skipped, never throw).
- *  Duplicate of payloadOk in src/adapters/pi/ledger.ts — keep in sync. */
-function payloadOk(type: LedgerEntryType, data: unknown): data is LedgerPayload[LedgerEntryType] {
-  if (typeof data !== 'object' || data === null) return false;
-  const d = data as Record<string, unknown>;
-  switch (type) {
-    case 'om.observation':
-      return (
-        typeof d.id === 'string' &&
-        typeof d.coversUpToId === 'string' &&
-        typeof d.content === 'string' &&
-        typeof d.tokenCount === 'number'
-      );
-    case 'om.tombstone':
-      return Array.isArray(d.observationIds);
-    case 'om.cost':
-      return typeof d.runId === 'string' && typeof d.usd === 'number';
-    case 'om.gap-marker':
-      return typeof d.id === 'string' && typeof d.ms === 'number';
-    case 'om.enabled':
-      return typeof d.enabled === 'boolean';
-    case 'om.run':
-      return typeof d.runId === 'string' && typeof d.status === 'string';
-    case 'om.lastError':
-      return typeof d.message === 'string';
-    default:
-      return false;
-  }
-}
+/** S3: the shared strict payload validator (core/ledger/payload.ts). */
+import { omPayloadOk } from '../../core/ledger/payload.js';
 
 /** Read-only LedgerStore over parsed pi-session om entries (append is a no-op). */
 export class PiSessionLedger implements LedgerStore {
@@ -182,7 +155,7 @@ export function readPiLedger(file: string, expectedSessionId?: string): PiLedger
     const rec = e.data as { type?: string; data?: unknown; at?: string; meta?: { runId?: string } };
     if (typeof rec.type !== 'string') continue;
     const etype = rec.type as LedgerEntryType;
-    if (!payloadOk(etype, rec.data)) continue;
+    if (!omPayloadOk(etype, rec.data)) continue;
     entries.push({
       type: etype,
       data: rec.data as LedgerPayload[LedgerEntryType],

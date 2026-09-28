@@ -36,14 +36,16 @@ export interface PriorityConfig {
 }
 
 /**
- * Compaction injection mode (v0.5):
- *  - full: render the whole pre-tail pool (default, cache-friendly);
- *  - topK: deterministic budget trim — critical first, then important,
- *    then routine (newest first within a class), up to topKBudgetTokens.
+ * Compaction injection mode (v0.5). Both modes render through the same
+ * deterministic budget trim (critical → important → routine, newest first
+ * within a class); the observations part is always capped by
+ * `maxCompactBlockTokens`:
+ *  - full: the whole pre-tail pool, but never more than that cap
+ *    (default, cache-friendly);
+ *  - topK: the same cap, explicitly as a selection budget.
  */
 export interface CompactionConfig {
   inject: 'full' | 'topK';
-  topKBudgetTokens: number;
 }
 
 /**
@@ -161,7 +163,7 @@ export const DEFAULT_CONFIG: OmConfig = {
   gapMarkers: { enabled: true, thresholdMs: 10 * 60 * 1000 },
   earlyActivation: { enabled: true, idleMs: 5 * 60 * 1000, minUnobservedTokens: 300 },
   priority: { enabled: true },
-  compaction: { inject: 'full', topKBudgetTokens: 20000 },
+  compaction: { inject: 'full' },
   reflector: { enabled: true, idleMs: 30 * 60 * 1000, minIntervalMs: 6 * 60 * 60 * 1000 },
   shared: { enabled: true },
   extractors: [
@@ -232,7 +234,6 @@ export function validateConfig(c: OmConfig): void {
     problems.push('earlyActivation.minUnobservedTokens must be > 0');
   if (c.compaction.inject !== 'full' && c.compaction.inject !== 'topK')
     problems.push("compaction.inject must be 'full' or 'topK'");
-  if (!(c.compaction.topKBudgetTokens > 0)) problems.push('compaction.topKBudgetTokens must be > 0');
   if (!(c.reflector.idleMs > 0)) problems.push('reflector.idleMs must be > 0');
   if (!(c.reflector.minIntervalMs > 0)) problems.push('reflector.minIntervalMs must be > 0');
   if (!Array.isArray(c.extractors)) problems.push('extractors must be an array');

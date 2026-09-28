@@ -10,6 +10,7 @@
  *   (getBranch, C1), so it is filtered to that branch by construction and
  *   further filtered by customType.
  */
+import { omPayloadOk } from '../../core/ledger/payload.js';
 import type {
   LedgerEntryType,
   LedgerPayload,
@@ -20,35 +21,6 @@ import type {
 import type { PiEntry } from './types.js';
 
 export const OM_CUSTOM_TYPE = 'om';
-
-/** Loose payload shape check (NFR-1: corrupt payloads are skipped, never throw). */
-function payloadOk(type: LedgerEntryType, data: unknown): data is LedgerPayload[LedgerEntryType] {
-  if (typeof data !== 'object' || data === null) return false;
-  const d = data as Record<string, unknown>;
-  switch (type) {
-    case 'om.observation':
-      return (
-        typeof d.id === 'string' &&
-        typeof d.coversUpToId === 'string' &&
-        typeof d.content === 'string' &&
-        typeof d.tokenCount === 'number'
-      );
-    case 'om.tombstone':
-      return Array.isArray(d.observationIds);
-    case 'om.cost':
-      return typeof d.runId === 'string' && typeof d.usd === 'number';
-    case 'om.gap-marker':
-      return typeof d.id === 'string' && typeof d.ms === 'number';
-    case 'om.enabled':
-      return typeof d.enabled === 'boolean';
-    case 'om.run':
-      return typeof d.runId === 'string' && typeof d.status === 'string';
-    case 'om.lastError':
-      return typeof d.message === 'string';
-    default:
-      return false;
-  }
-}
 
 export class PiLedgerStore implements LedgerStore {
   constructor(
@@ -75,7 +47,7 @@ export class PiLedgerStore implements LedgerStore {
       if (typeof rec.type !== 'string') continue;
       const etype = rec.type as LedgerEntryType;
       if (type && etype !== type) continue;
-      if (!payloadOk(etype, rec.data)) continue;
+      if (!omPayloadOk(etype, rec.data)) continue; // S3: shared strict validator
       out.push({
         type: etype as unknown as T,
         data: rec.data as LedgerPayload[T],
