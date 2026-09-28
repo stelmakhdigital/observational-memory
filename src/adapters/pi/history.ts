@@ -190,4 +190,17 @@ export class PiHistorySource implements HistorySource {
     }
     return null;
   }
+
+  /** [lastAt, prevAt] of the branch tail (R2, gap markers). */
+  lastTwoMessageAts(): [Date | null, Date | null] {
+    const entries = this.sessionManager().getBranch();
+    let last: Date | null = null;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i];
+      if (e?.type !== 'message') continue;
+      if (last === null) last = new Date(e.timestamp);
+      else return [last, new Date(e.timestamp)];
+    }
+    return [last, null];
+  }
 }

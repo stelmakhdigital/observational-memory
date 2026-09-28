@@ -94,4 +94,30 @@ describe('MessageChunker.next', () => {
     const c = chunkerOverlap.next(m, { coversUpToId: '', observedTokens: 0 })!;
     expect(c.overlapContext).toBe('');
   });
+
+  // R1: an oversized message right before the slice must NOT pull the whole
+  // pre-slice history into the overlap (begin used to start at 0).
+  it('R1: oversized tail message before the slice keeps the overlap bounded', () => {
+    // watermark covers m2 → startIdx = 2, startIdx-1 = 1 ≥ 1;
+    // messages[startIdx-1] = m2 (12) > overlapTokens (6);
+    // fresh = m3+m4 = 11 ≥ 10 → chunk exists.
+    const m = msgs(
+      ['m1', 'abc'],
+      ['m2', 'l'.repeat(12)],
+      ['m3', 'xyzwv'],
+      ['m4', 'vwxyzw'],
+    );
+    const c = chunkerOverlap.next(m, { coversUpToId: 'm2', observedTokens: 15 })!;
+    expect(c.coversUpToId).toBe('m4');
+    // overlap = only the oversized tail message; messages[0] (m1) excluded
+    expect(c.overlapContext).toBe('l'.repeat(12));
+    expect(c.overlapContext).not.toContain('abc');
+  });
+
+  it('R1: with a fitting tail, the overlap never grows past the budget', () => {
+    // m1, m2 each 5 tokens; overlap 6 → tail m2 fits, m1 would exceed
+    const m = msgs(['m1', 'aaaaa'], ['m2', 'bbbbb'], ['m3', 'c'.repeat(10)]);
+    const c = chunkerOverlap.next(m, { coversUpToId: 'm2', observedTokens: 10 })!;
+    expect(c.overlapContext).toBe('bbbbb');
+  });
 });

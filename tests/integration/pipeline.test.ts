@@ -11,6 +11,7 @@ import type {
   EventSink,
   LedgerEntryType,
   LedgerStore,
+  ModelRunner,
   OmStatus,
   RunInfo,
   TypedLedgerEntry,
@@ -231,11 +232,11 @@ describe('compaction (FR-3)', () => {
   });
 });
 
-describe('gap markers (FR-8)', () => {
-  it('marks a pause and includes it in the compaction block', async () => {
+describe('gap markers (FR-8, R2: pause between messages, not run duration)', () => {
+  it('marks a 2-day pause BETWEEN two messages (a) and includes it in the compaction block', async () => {
     orch.setEnabled(true);
-    history.add('m1', 'aaaa');
-    history.lastAt = new Date('2025-09-19T09:00:00Z'); // 2+ days before clock
+    history.add('m1', 'aaaa', 4, new Date('2025-09-19T09:00:00Z'));
+    history.add('m2', 'bbbb', 4, new Date('2025-09-21T12:00:00Z')); // +2d3h
     history.contextTokens = 150;
     history.idle = true;
     await orch.onAgentEnd();
@@ -248,14 +249,108 @@ describe('gap markers (FR-8)', () => {
     expect(b.text).toContain('resumed after 2 дня 3 часа');
   });
 
-  it('does not double-mark the same pause', async () => {
+  it('does NOT mark a long run whose messages are close together (b)', async () => {
+    // the run itself was long (11:00 → now 12:00) but the inter-message
+    // pause is only 5 min < the 10-min threshold → no marker
     orch.setEnabled(true);
-    history.lastAt = new Date('2025-09-19T09:00:00Z');
+    history.add('m1', 'aaaa', 4, new Date('2025-09-21T11:00:00Z'));
+    history.add('m2', 'bbbb', 4, new Date('2025-09-21T11:05:00Z'));
+    history.contextTokens = 150;
+    history.idle = true;
+    await orch.onAgentEnd();
+
+    expect(ledger.read('om.gap-marker')).toEqual([]);
+  });
+
+  it('does not double-mark the same pause (c: dedup by prevAt)', async () => {
+    orch.setEnabled(true);
+    history.add('m1', 'aaaa', 4, new Date('2025-09-19T09:00:00Z'));
+    history.add('m2', 'bbbb', 4, new Date('2025-09-21T12:00:00Z'));
     history.contextTokens = 150;
     history.idle = true;
     await orch.onAgentEnd();
     await orch.onAgentEnd();
     expect(ledger.read('om.gap-marker').length).toBe(1);
+  });
+});
+
+describe('shutdown final pump (E1: tail race)', () => {
+  const slowObserver = (delayMs: number) =>
+    new MockRunner(
+      {
+        result: (i: WorkerInput) => ({
+          runId: i.runId,
+          ok: true,
+          observations: drafts(`note ${i.chunk!.coversUpToId}`),
+        }),
+        delayMs,
+      },
+      okConsolidator,
+    );
+
+  const makeOrch2 = (runner: ModelRunner, id: string) =>
+    new OmOrchestrator({
+      config: baseConfig,
+      sessionId: id,
+      history,
+      ledger,
+      runner,
+      memory,
+      sink,
+    });
+
+  it('observes a tail ≥ chunkTokens that accumulated after the last onTurnEnd', async () => {
+    const slow = slowObserver(50);
+    const orch2 = makeOrch2(slow, 's-e1');
+    orch2.setEnabled(true);
+    history.add('m1', 'aaaaaaaaaa'); // 10 tokens = chunk → observer in flight
+    orch2.onTurnEnd();
+    history.add('m2', 'bbbbbbbbbb'); // tail ≥ chunk, arrived while in flight
+    expect(slow.inFlight).toBe(1);
+
+    await orch2.shutdown();
+
+    const obs = slow.calls.filter((c) => c.role === 'observer');
+    expect(obs.length).toBe(2);
+    expect(obs[0]!.input.chunk!.coversUpToId).toBe('m1');
+    expect(obs[1]!.input.chunk!.coversUpToId).toBe('m2');
+    expect(ledger.read('om.observation').map((e) => e.data.content)).toEqual([
+      'note m1',
+      'note m2',
+    ]); // both committed: the in-flight m1 and the shutdown-pumped m2
+  });
+
+  it('does not launch an extra observer when the tail < chunkTokens', async () => {
+    const slow = slowObserver(30);
+    const orch2 = makeOrch2(slow, 's-e1b');
+    orch2.setEnabled(true);
+    history.add('m1', 'aaaaaaaaaa');
+    orch2.onTurnEnd();
+    history.add('m2', 'bbbb'); // 4 < 10 → not a chunk
+
+    await orch2.shutdown();
+
+    expect(slow.calls.filter((c) => c.role === 'observer').length).toBe(1);
+  });
+
+  it('does not re-run a slice that failed before shutdown (no extra LLM cost)', async () => {
+    const dead = new MockRunner(
+      {
+        result: (i: WorkerInput) => ({ runId: i.runId, ok: true, observations: drafts('x') }),
+        failFirst: 2, // both the attempt and its retry fail → slice uncommitted
+      },
+      okConsolidator,
+    );
+    const orch2 = makeOrch2(dead, 's-e1c');
+    orch2.setEnabled(true);
+    history.add('m1', 'aaaaaaaaaa');
+    orch2.onTurnEnd();
+    await dead.drain();
+    expect(ledger.read('om.observation')).toEqual([]);
+
+    const callsBefore = dead.calls.length;
+    await orch2.shutdown();
+    expect(dead.calls.length).toBe(callsBefore); // failed slice skipped, not re-run
   });
 });
 

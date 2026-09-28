@@ -92,10 +92,15 @@ export class MessageChunker {
     let overlapContext = '';
     if (overlapTokens > 0 && startIdx > 0) {
       let acc = 0;
-      let begin = 0;
+      // R1: begin starts at startIdx (empty overlap). An oversized tail
+      // message then becomes the WHOLE overlap (like an oversized chunk),
+      // instead of `begin = 0` pulling the entire pre-slice history in.
+      let begin = startIdx;
       for (let i = startIdx - 1; i >= 0; i--) {
         const t = this.tokensOf(messages[i]!);
-        if (acc + t > overlapTokens && begin < startIdx - 1) break;
+        // break only when at least one message was already taken and adding
+        // another would exceed the budget (the tail message is always kept)
+        if (acc + t > overlapTokens && begin < startIdx) break;
         acc += t;
         begin = i;
       }

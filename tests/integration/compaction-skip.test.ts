@@ -102,6 +102,17 @@ function addHistory(): void {
   history.add('m6', 'f'.repeat(15));
 }
 
+/**
+ * Settle in-flight workers WITHOUT the shutdown final pump (E1): shutdown
+ * now also observes pending tails, which would advance the watermark past
+ * the point these tests freeze it at. The commit lands right after the
+ * gated run resolves, so waiting on `pending` + a tick is enough.
+ */
+async function settleNoPump(): Promise<void> {
+  while (runner.pending) await sleep(1);
+  await sleep(1);
+}
+
 beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), 'om-skip-'));
   history = new MockHistory({ chunkTokens: cfg.chunkTokens });
@@ -127,7 +138,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 async function commitChunks(n: number): Promise<void> {
   for (let i = 0; i < n; i++) {
     orch.onTurnEnd();
-    await orch.shutdown();
+    await settleNoPump();
   }
 }
 
@@ -172,7 +183,7 @@ describe('compaction drain fast path (R5)', () => {
     expect(b.verbatimTail).toContain('d'.repeat(15));
 
     runner.release();
-    await orch.shutdown();
+    await settleNoPump();
     // After the late commit the observation exists but stays OUT of future
     // pre-tail renders (its slice is in the tail) — no double representation.
     const stored = ledger.read('om.observation').map((e) => e.data);

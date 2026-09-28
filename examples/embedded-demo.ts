@@ -58,6 +58,9 @@ class DemoHistory implements HistorySource {
   lastMessageAt(): Date | null {
     return new Date();
   }
+  lastTwoMessageAts(): [Date | null, Date | null] {
+    return [new Date(), null]; // no gap in the demo
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -144,6 +144,24 @@ describe('PiHistorySource', () => {
     expect(src.lastMessageAt()?.toISOString()).toBe('2025-09-21T10:00:00.000Z');
   });
 
+  it('lastTwoMessageAts returns [lastAt, prevAt] from the branch tail (R2)', () => {
+    expect(src.lastTwoMessageAts()).toEqual([
+      new Date('2025-09-21T10:00:00Z'),
+      new Date('2025-09-21T10:00:00Z'),
+    ]);
+  });
+
+  it('lastTwoMessageAts: single message → prevAt is null', () => {
+    const s1 = new PiHistorySource(
+      () => makeCtx([m1]).sessionManager,
+      () => makeCtx([m1], 500),
+      { chunkTokens: 10 },
+    );
+    const [last, prev] = s1.lastTwoMessageAts();
+    expect(last?.toISOString()).toBe('2025-09-21T10:00:00.000Z');
+    expect(prev).toBeNull();
+  });
+
   describe('branching (C1: getBranch, not getEntries)', () => {
     // Tree: a — b — c (live) and b — d (dead branch, switched away via /tree).
     const a = msg('b1', t1, 'user');
@@ -187,6 +205,13 @@ describe('PiHistorySource', () => {
 
     it('lastMessageAt ignores dead-branch messages', () => {
       expect(srcB.lastMessageAt()?.toISOString()).toBe('2025-09-21T11:00:00.000Z');
+    });
+
+    it('lastTwoMessageAts reads the branch tail, ignoring dead branches (R2)', () => {
+      // branch: b1(10:00), b2(10:00), b3(11:00); dead b4(10:30) must be skipped
+      const [last, prev] = srcB.lastTwoMessageAts();
+      expect(last?.toISOString()).toBe('2025-09-21T11:00:00.000Z');
+      expect(prev?.toISOString()).toBe('2025-09-21T10:00:00.000Z');
     });
 
     it('watermark from a dead branch rolls back to the start of the branch', () => {

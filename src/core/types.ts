@@ -275,6 +275,13 @@ export interface HistorySource {
   tailStartIdFor?(maxTokens: number): string;
   /** For gap markers. */
   lastMessageAt(): Date | null;
+  /**
+   * Timestamps of the last two messages of the branch (for gap markers,
+   * R2): [lastAt, prevAt]; prevAt is null when there is only one message.
+   * The gap measured is lastAt − prevAt — the user's pause between the two
+   * messages (before the current run), not the duration of the last run.
+   */
+  lastTwoMessageAts(): [Date | null, Date | null];
 }
 
 /** Append-only ledger seam. Implementations: PiAppendEntryStore, FileLedgerStore. */

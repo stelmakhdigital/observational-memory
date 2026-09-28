@@ -26,6 +26,8 @@ export const draft = (text: string, priority: ObservationDraft['priority']): Obs
 
 export class MockHistory implements HistorySource {
   messages: OmMessage[] = [];
+  /** Per-message timestamps (parallel to messages, R2 gap markers). */
+  ats: Date[] = [];
   chunker: MessageChunker;
   contextTokens = 0;
   idle = true;
@@ -54,9 +56,10 @@ export class MockHistory implements HistorySource {
     };
   }
 
-  add(id: string, text: string, tokens?: number): void {
+  add(id: string, text: string, tokens?: number, at?: Date): void {
     this.messages.push({ id, text, tokens: tokens ?? identityEstimate(text) });
-    this.lastAt = new Date();
+    this.ats.push(at ?? new Date());
+    this.lastAt = at ?? new Date();
   }
 
   nextChunk(since: { coversUpToId: string; observedTokens: number }, opts?: { minTokens?: number }) {
@@ -88,6 +91,13 @@ export class MockHistory implements HistorySource {
   }
   lastMessageAt(): Date | null {
     return this.lastAt;
+  }
+
+  /** [lastAt, prevAt] (R2 gap markers); prevAt null for a single message. */
+  lastTwoMessageAts(): [Date | null, Date | null] {
+    const n = this.messages.length;
+    if (n === 0) return [null, null];
+    return [this.ats[n - 1]!, n > 1 ? this.ats[n - 2]! : null];
   }
 }
 

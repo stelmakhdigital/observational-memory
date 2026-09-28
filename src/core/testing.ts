@@ -15,7 +15,8 @@ export interface DemoHistoryOptions {
 
 export class DemoHistory implements HistorySource {
   messages: OmMessage[] = [];
-  lastAt: Date = new Date();
+  /** Per-message timestamps (parallel to messages, R2 gap markers). */
+  ats: Date[] = [];
   private readonly chunker: MessageChunker;
 
   constructor(opts: DemoHistoryOptions = {}) {
@@ -25,11 +26,11 @@ export class DemoHistory implements HistorySource {
     });
   }
 
-  /** Append a message with an auto id; returns the id. */
-  add(text: string): string {
+  /** Append a message with an auto id; returns the id. `at` for gap tests. */
+  add(text: string, at?: Date): string {
     const id = `h${String(this.messages.length).padStart(6, '0')}`;
     this.messages.push({ id, text, tokens: estimateTokens(text) });
-    this.lastAt = new Date();
+    this.ats.push(at ?? new Date());
     return id;
   }
 
@@ -78,6 +79,14 @@ export class DemoHistory implements HistorySource {
   }
 
   lastMessageAt(): Date | null {
-    return this.messages.length > 0 ? this.lastAt : null;
+    const n = this.messages.length;
+    return n > 0 ? this.ats[n - 1]! : null;
+  }
+
+  /** [lastAt, prevAt] (R2, gap markers); prevAt null for a single message. */
+  lastTwoMessageAts(): [Date | null, Date | null] {
+    const n = this.messages.length;
+    if (n === 0) return [null, null];
+    return [this.ats[n - 1]!, n > 1 ? this.ats[n - 2]! : null];
   }
 }

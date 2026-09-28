@@ -14,17 +14,18 @@ describe('detectGap', () => {
 
   it('returns null when disabled or no prior activity', () => {
     expect(detectGap(null, D('2025-09-21T12:00:00Z'), opts)).toBeNull();
+    expect(detectGap(null, null, opts)).toBeNull();
     expect(
-      detectGap(D('2025-09-21T11:00:00Z'), D('2025-09-21T12:00:00Z'), { ...opts, enabled: false }),
+      detectGap(D('2025-09-21T12:00:00Z'), D('2025-09-21T11:00:00Z'), { ...opts, enabled: false }),
     ).toBeNull();
   });
 
   it('returns null below threshold', () => {
-    expect(detectGap(D('2025-09-21T11:55:00Z'), D('2025-09-21T12:00:00Z'), opts)).toBeNull();
+    expect(detectGap(D('2025-09-21T12:00:00Z'), D('2025-09-21T11:55:00Z'), opts)).toBeNull();
   });
 
   it('detects a gap with ms and human duration', () => {
-    const g = detectGap(D('2025-09-19T09:00:00Z'), D('2025-09-21T12:00:00Z'), opts);
+    const g = detectGap(D('2025-09-21T12:00:00Z'), D('2025-09-19T09:00:00Z'), opts);
     expect(g).not.toBeNull();
     expect(g!.ms).toBe(2 * 86_400_000 + 3 * 3_600_000);
     expect(g!.humanDuration).toBe('2 дня 3 часа');
@@ -53,7 +54,7 @@ describe('humanDuration', () => {
 
 describe('renderGapMarkers', () => {
   it('renders list, empty → empty string', () => {
-    const g = detectGap(D('2025-09-19T09:00:00Z'), D('2025-09-21T12:00:00Z'), {
+    const g = detectGap(D('2025-09-21T12:00:00Z'), D('2025-09-19T09:00:00Z'), {
       enabled: true,
       thresholdMs: 10 * 60 * 1000,
     })!;

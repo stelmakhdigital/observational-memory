@@ -19,18 +19,20 @@ export interface DetectedGap {
 }
 
 /**
- * Detect a gap between the last activity and `now`.
- * Returns null when disabled, below threshold, or no prior activity.
+ * Detect a gap between two consecutive branch messages (R2): `lastAt` is the
+ * newest message and `prevAt` the one before it. `at` is lastAt — the moment
+ * the conversation resumed after the pause. Returns null when disabled, below
+ * threshold, or when either timestamp is missing.
  */
 export function detectGap(
   lastAt: Date | null,
-  now: Date,
+  prevAt: Date | null,
   opts: GapMarkerOptions,
 ): DetectedGap | null {
-  if (!opts.enabled || lastAt === null) return null;
-  const ms = now.getTime() - lastAt.getTime();
+  if (!opts.enabled || lastAt === null || prevAt === null) return null;
+  const ms = lastAt.getTime() - prevAt.getTime();
   if (ms < opts.thresholdMs) return null;
-  return { at: now, lastAt, ms, humanDuration: humanDuration(ms) };
+  return { at: lastAt, lastAt, ms, humanDuration: humanDuration(ms) };
 }
 
 const UNITS: [number, string, string, string][] = [

@@ -134,9 +134,22 @@ export class OmOrchestrator {
   private seeded = false;
   private inFlight: InFlight[] = [];
   private pendingChunks = new Set<string>();
+  /**
+   * E1 guard: coversUpToId of slices that were attempted but never committed
+   * (worker failed after the retry, or the commit itself failed). The
+   * shutdown final pump skips them — they are re-observed on a later cycle,
+   * not re-run for free LLM cost at shutdown time.
+   */
+  private readonly badSlices = new Set<string>();
   private consolidating = false;
   private extracting = false;
   private lastGapMarkedFor: Date | null = null;
+  /**
+   * E1: total history tokens at the moment of the last observer pump
+   * (`unobservedTokens('')` — everything). shutdown uses it to decide whether
+   * new history arrived after the last pump (the tail race).
+   */
+  private lastPumpedTotalTokens = 0;
   private compactedForTokens = 0;
   /**
    * Auto-resume (FR-3): the just-ended agent run left the task unfinished
@@ -241,6 +254,7 @@ export class OmOrchestrator {
 
   /** One early observer slice with a lowered token threshold. */
   private earlyPump(): void {
+    this.lastPumpedTotalTokens = this.safeTotalTokens();
     if (this.observersInFlight() >= this.cfg.observerConcurrency) return;
     const wm = this.watermark();
     const chunk = this.d.history.nextChunk(
@@ -299,6 +313,7 @@ export class OmOrchestrator {
   }
 
   private pumpObservers(): void {
+    this.lastPumpedTotalTokens = this.safeTotalTokens();
     // eslint-disable-next-line no-constant-condition
     while (true) {
       if (this.observersInFlight() >= this.cfg.observerConcurrency) return;
@@ -333,6 +348,8 @@ export class OmOrchestrator {
   }
 
   private commitObservations(runId: string, coversUpToId: string, fromId: string | undefined, res: WorkerResult): void {
+    // the slice committed → it is no longer "bad" (E1 shutdown pump may pass it)
+    this.badSlices.delete(coversUpToId);
     if (!this.enabled) {
       this.log(`discarding observations of ${runId} (disabled mid-run)`);
       return;
@@ -535,12 +552,17 @@ export class OmOrchestrator {
   // ---- gap markers (FR-8) --------------------------------------------------
 
   private maybeMarkGap(): void {
-    const lastAt = this.d.history.lastMessageAt();
-    const gap = detectGap(lastAt, this.now(), this.cfg.gapMarkers);
+    // R2: the pause to measure is BETWEEN the last two branch messages
+    // (the user's pause before the current run). The old `now() - lastAt`
+    // measured the duration of the run that JUST finished — not a pause.
+    const [lastAt, prevAt] = this.d.history.lastTwoMessageAts();
+    if (lastAt === null || prevAt === null) return;
+    const gap = detectGap(lastAt, prevAt, this.cfg.gapMarkers);
     if (!gap) return;
-    // one marker per pause: skip if we already marked a gap covering this lastAt
-    if (this.lastGapMarkedFor && lastAt !== null && lastAt <= this.lastGapMarkedFor) return;
-    this.lastGapMarkedFor = lastAt;
+    // one marker per pause: skip if we already marked a gap with the same
+    // second-to-last message (dedup by prevAt)
+    if (this.lastGapMarkedFor && prevAt <= this.lastGapMarkedFor) return;
+    this.lastGapMarkedFor = prevAt;
     const seq = this.d.ledger.read<'om.gap-marker'>('om.gap-marker').length;
     const at = this.now().toISOString();
     this.d.ledger.append({
@@ -887,6 +909,8 @@ export class OmOrchestrator {
             return attempt(retriesLeft - 1);
           }
           this.recordRun(input.runId, input.role, 'error', undefined, msg);
+          const badId = input.chunk?.coversUpToId;
+          if (badId) this.badSlices.add(badId); // E1: shutdown must not re-run it
           const at = this.now().toISOString();
           this.d.ledger.append({
             type: 'om.lastError',
@@ -905,6 +929,8 @@ export class OmOrchestrator {
    */
   private handleCommitFailure(input: WorkerInput, err: unknown, res: WorkerResult): void {
     const msg = err instanceof Error ? err.message : String(err);
+    const badId = input.chunk?.coversUpToId;
+    if (badId) this.badSlices.add(badId); // E1: shutdown must not re-run it
     const detail = `commit failed (run ${input.runId}, ${input.role}) after 1 commit-retry: ${msg};\nresult: ${summarizeWorkerResult(res)}`;
     const at = this.now().toISOString();
     try {
@@ -983,6 +1009,15 @@ export class OmOrchestrator {
     }
   }
 
+  /** Total history tokens (`unobservedTokens('')` = everything); -1 on error. */
+  private safeTotalTokens(): number {
+    try {
+      return this.d.history.unobservedTokens('');
+    } catch {
+      return -1;
+    }
+  }
+
   // ---- lifecycle -------------------------------------------------------------
 
   /** Wait for all in-flight workers (graceful shutdown / pre-compaction). */
@@ -993,6 +1028,30 @@ export class OmOrchestrator {
     this.reflectTimer = null;
     // Quiescent drain (see runCompaction): follow-up workers spawned while
     // draining must be awaited too.
+    for (;;) {
+      const inflight = this.inFlight.slice();
+      if (inflight.length === 0) break;
+      await Promise.allSettled(inflight.map((r) => r.promise));
+    }
+    // E1 (tail race): while an observer was in flight the pump saw only that
+    // in-flight slice (the watermark does not move until the commit), so a
+    // tail of ≥ chunkTokens arriving after the last pump stays unobserved.
+    // If history GREW since the last pump, do one final pump: inFlight is
+    // empty (no duplicate of an in-flight slice; committed-only watermark +
+    // pendingChunks guard the rest), badSlices skips slices that never
+    // committed (they are re-observed on a later cycle, not re-run for LLM
+    // cost at shutdown). History unchanged → no pump (an idle quiescent
+    // shutdown stays a no-op).
+    if (this.enabled && !this.cfg.passive && this.safeTotalTokens() > this.lastPumpedTotalTokens) {
+      const chunk = this.d.history.nextChunk({
+        coversUpToId: this.watermark().coversUpToId,
+        observedTokens: 0,
+      });
+      if (chunk && !this.badSlices.has(chunk.coversUpToId)) {
+        this.startObserver(chunk.coversUpToId, chunk.text, chunk.overlapContext, chunk.fromId);
+      }
+    }
+    // Drain the possibly-pumped observer (and any follow-ups it spawned).
     for (;;) {
       const inflight = this.inFlight.slice();
       if (inflight.length === 0) break;
