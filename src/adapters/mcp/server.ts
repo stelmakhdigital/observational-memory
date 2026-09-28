@@ -6,15 +6,22 @@
  * Run:   npm run build && OM_MCP_ROOT=<memory root> OM_MCP_SESSION=<sessionId> npm run mcp
  * Env:
  *   OM_MCP_ROOT              — memory root dir (the one from createOmSession / pi .memory)
- *   OM_MCP_SESSION           — session id (sanitized the same way as MemoryStore)
+ *   OM_MCP_SESSION           — session id (sanitized the same way as MemoryStore). In
+ *                              pi-session mode it doubles as the session-id cross-check:
+ *                              only a pi session file whose header id
+ *                              (first line {"type":"session","id":...}) matches is used —
+ *                              for both the explicit OM_MCP_PI_SESSION path and the
+ *                              auto-scan — so the server never answers from ANOTHER
+ *                              project's session (om_status shows `session: <id>`)
  *   OM_MCP_SHARED            — optional shared topics dir (default: <root>/shared)
  *   OM_MCP_PI_SESSION        — optional EXACT path to a pi session JSONL to read the
  *                              ledger from (pi stores om.* as custom entries in the
  *                              session file, not in <root>/<sessionId>/ledger.jsonl)
  *   OM_MCP_PI_SESSIONS_DIR   — optional sessions dir for auto-scan (default
  *                              ~/.pi/agent/sessions): the most recent .jsonl (≤50 newest
- *                              files by mtime) containing om.* entries is used as the
- *                              ledger source
+ *                              files by mtime) containing om.* entries AND (when
+ *                              OM_MCP_SESSION is set) whose header session id matches
+ *                              it, is used as the ledger source
  *
  * Ledger source (om_status/om_recall), first match wins:
  *   1. OM_MCP_PI_SESSION (if the file has valid om.* entries)
@@ -102,6 +109,8 @@ interface McpState {
   /** Where om_status/om_recall read the ledger from (user-visible in om_status). */
   ledgerSource: 'embedded' | 'pi-session';
   ledgerFile: string;
+  /** Header session id of the pi-session file (null for the embedded ledger). */
+  ledgerSessionId: string | null;
   memory: MemoryStore;
   sessionId: string;
 }
@@ -124,19 +133,22 @@ function initState(): McpState {
     const sessionsDir = process.env.OM_MCP_PI_SESSIONS_DIR
       ? path.resolve(process.env.OM_MCP_PI_SESSIONS_DIR)
       : path.join(os.homedir(), '.pi', 'agent', 'sessions');
-    const scanned = scanForPiSession(sessionsDir);
+    const scanned = scanForPiSession(sessionsDir, sessionId);
     if (scanned) candidates.push(scanned);
   }
   const embeddedFile = defaultLedgerFile(root, sessionId);
   let ledger: LedgerStore | null = null;
   let ledgerSource: 'embedded' | 'pi-session' = 'embedded';
   let ledgerFile = embeddedFile;
+  let ledgerSessionId: string | null = null;
   for (const c of candidates) {
-    const res = readPiLedger(c);
+    // sessionId cross-check: a foreign project's session file is a mismatch, not a hit.
+    const res = readPiLedger(c, sessionId);
     if (res) {
       ledger = res.store;
       ledgerSource = 'pi-session';
       ledgerFile = c;
+      ledgerSessionId = res.sessionId;
       break;
     }
   }
@@ -151,6 +163,7 @@ function initState(): McpState {
     ledger,
     ledgerSource,
     ledgerFile,
+    ledgerSessionId,
     memory: new MemoryStore(root, { sharedDir }),
     sessionId,
   };
@@ -169,6 +182,7 @@ function toolStatus(s: McpState): ToolResult {
   const text = [
     `session: ${s.sessionId}`,
     `source: ${s.ledgerSource} — ${s.ledgerFile}`,
+    s.ledgerSessionId ? `session: ${s.ledgerSessionId}` : '',
     `active observations: ${active.length} (~${activeTokens} tokens)`,
     `consolidated observations: ${obsAll.length - active.length}`,
     `topics: ${topics.map((t) => t.topic).join(', ') || '(none)'}`,

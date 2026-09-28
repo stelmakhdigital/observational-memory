@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, openSync, utimesSync, writeFileSync, writeSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { handleMcpRequest } from '../../src/adapters/mcp/server.js';
-import { readPiLedger, scanForPiSession } from '../../src/adapters/mcp/pi-ledger.js';
+import { readAllSync, readPiLedger, readPiSessionId, scanForPiSession } from '../../src/adapters/mcp/pi-ledger.js';
 import { FileLedgerStore, defaultLedgerFile } from '../../src/core/ledger/file-store.js';
 
 let dir: string;
@@ -21,9 +21,9 @@ function omLine(payload: Record<string, unknown>): string {
 }
 
 /** A realistic pi session JSONL: header, messages, om entries, garbage. */
-function writePiSession(file: string): void {
+function writePiSession(file: string, id = 'sess'): void {
   const lines = [
-    JSON.stringify({ type: 'session', version: 3, id: 'sess', timestamp: '2026-01-05T23:59:00Z', cwd: '/tmp' }),
+    JSON.stringify({ type: 'session', version: 3, id, timestamp: '2026-01-05T23:59:00Z', cwd: '/tmp' }),
     JSON.stringify({ type: 'message', id: 'm1', parentId: null, timestamp: '2026-01-05T23:59:30Z', message: { role: 'user', content: 'hi' } }),
     omLine({ type: 'om.observation', data: { id: 'om-1', coversUpToId: 'm2', content: 'chose sqlite for the storage layer', tokenCount: 9, createdAt: '2026-01-06T00:00:00Z' }, at: '2026-01-06T00:00:00Z' }),
     'not json at all', // crash-tail / garbage line
@@ -78,6 +78,75 @@ describe('readPiLedger (pi session JSONL parse)', () => {
     writeFileSync(plain, JSON.stringify({ type: 'message', id: 'm1', parentId: null, timestamp: 't', message: {} }) + '\n');
     expect(readPiLedger(plain)).toBeNull();
   });
+
+  it('returns the header session id (null for missing file / non-header first line)', () => {
+    const file = path.join(dir, 's.jsonl');
+    writePiSession(file, 'abc-123');
+    expect(readPiLedger(file)!.sessionId).toBe('abc-123');
+    expect(readPiSessionId(file)).toBe('abc-123');
+    expect(readPiSessionId(path.join(dir, 'nope.jsonl'))).toBeNull();
+    const headless = path.join(dir, 'headless.jsonl');
+    writeFileSync(headless, omLine({ type: 'om.observation', data: { id: 'o', coversUpToId: 'm', content: 'x', tokenCount: 1 } }) + '\n');
+    expect(readPiSessionId(headless)).toBeNull();
+  });
+
+  it('expectedSessionId filter: matching id passes, foreign id / missing header → null', () => {
+    const file = path.join(dir, 's.jsonl');
+    writePiSession(file, 'abc-123');
+    expect(readPiLedger(file, 'abc-123')!.omEntries).toBe(3);
+    expect(readPiLedger(file, 'other')).toBeNull();
+    // headerless file with om entries: id cannot be verified → rejected when asked
+    const headless = path.join(dir, 'headless.jsonl');
+    writeFileSync(headless, omLine({ type: 'om.observation', data: { id: 'o', coversUpToId: 'm', content: 'x', tokenCount: 1 } }) + '\n');
+    expect(readPiLedger(headless)!.omEntries).toBe(1);
+    expect(readPiLedger(headless, 'any-id')).toBeNull();
+  });
+
+  it('reads the TAIL: om entries after >READ_BYTES of padding are found, head entries are not (A2)', () => {
+    const file = path.join(dir, 'big.jsonl');
+    const headObs = omLine({ type: 'om.observation', data: { id: 'om-head', coversUpToId: 'm0', content: 'old head observation', tokenCount: 4 } });
+    const tailObs = omLine({ type: 'om.observation', data: { id: 'om-tail', coversUpToId: 'm9', content: 'fresh tail observation', tokenCount: 5 } });
+    const pad = Buffer.alloc(26 * 1024 * 1024, 0x78); // >READ_BYTES (25 МБ) of 'x'
+    // file = header + head obs + 26MB pad + tail obs → head obs is outside the 25MB tail window
+    const fd = openSync(file, 'w');
+    writeSync(fd, `${JSON.stringify({ type: 'session', version: 3, id: 'sess', timestamp: 't', cwd: '/tmp' })}\n${headObs}\n`);
+    writeSync(fd, pad);
+    writeSync(fd, `\n${tailObs}\n`);
+    closeSync(fd);
+    const res = readPiLedger(file);
+    expect(res).not.toBeNull();
+    expect(res!.omEntries).toBe(1); // only the tail entry — head is beyond the window
+    expect(res!.store.read('om.observation')[0]!.data.id).toBe('om-tail');
+    // and the session id still comes from the header (separate head read)
+    expect(res!.sessionId).toBe('sess');
+  });
+});
+
+describe('readAllSync (A14 short-read loop)', () => {
+  const fakeRead = (chunk: number, total: number) =>
+    (_fd: number, buf: Buffer, off: number, len: number, pos: number): number => {
+      const n = Math.min(chunk, len, Math.max(0, total - pos));
+      for (let i = 0; i < n; i++) buf[off + i] = 97 + ((pos + i) % 26); // 'a'..
+      return n;
+    };
+
+  it('reassembles the range across short reads (chunk=3) with correct positions', () => {
+    const total = 100;
+    const buf = readAllSync(7, 0, 10, fakeRead(3, total));
+    expect(buf.toString()).toBe('abcdefghij');
+  });
+
+  it('handles a single full read and an EOF (0) mid-read → shorter result, no zero-fill', () => {
+    expect(readAllSync(7, 5, 4, fakeRead(1000, 9)).toString()).toBe('fghi');
+    // read reports 5 bytes once, then EOF (0): only those 5 come back (old code zero-filled the rest)
+    let calls = 0;
+    const n = readAllSync(7, 0, 10, () => (calls++ === 0 ? 5 : 0)).length;
+    expect(n).toBe(5);
+  });
+
+  it('advances the absolute position across loop iterations (from=10)', () => {
+    expect(readAllSync(7, 10, 5, fakeRead(2, 100)).toString()).toBe('klmno');
+  });
 });
 
 describe('scanForPiSession', () => {
@@ -99,6 +168,26 @@ describe('scanForPiSession', () => {
     expect(scanForPiSession(sessions)).toBe(withOmNew);
   });
 
+  it('expectedSessionId: picks the matching session even when a foreign one is newer (A3)', () => {
+    const sessions = path.join(dir, 'sessions');
+    const aDir = path.join(sessions, '--tmp-a--');
+    const bDir = path.join(sessions, '--tmp-b--');
+    for (const d of [aDir, bDir]) mkdirSync(d, { recursive: true });
+    const foreign = path.join(aDir, 'foreign.jsonl'); // newest, session id 'sess-a'
+    const own = path.join(bDir, 'own.jsonl'); // older, session id 'sess-b'
+    writePiSession(foreign, 'sess-a');
+    writePiSession(own, 'sess-b');
+    const t = (ms: number) => new Date(ms);
+    utimesSync(foreign, t(2000), t(2000));
+    utimesSync(own, t(1000), t(1000));
+    // without filter: the foreign (newer) session wins
+    expect(scanForPiSession(sessions)).toBe(foreign);
+    // with filter: only the matching session id is eligible
+    expect(scanForPiSession(sessions, 'sess-b')).toBe(own);
+    // unknown id: nothing matches
+    expect(scanForPiSession(sessions, 'sess-c')).toBeNull();
+  });
+
   it('returns null for a missing dir', () => {
     expect(scanForPiSession(path.join(dir, 'no-such-dir'))).toBeNull();
   });
@@ -108,11 +197,12 @@ describe('MCP tools over a pi session (M5)', () => {
   it('OM_MCP_PI_SESSION: status source=pi-session, recall finds pi observations', () => {
     const file = path.join(dir, 'pi', 'sess.jsonl');
     mkdirSync(path.dirname(file), { recursive: true });
-    writePiSession(file);
+    writePiSession(file, S);
     process.env.OM_MCP_PI_SESSION = file;
 
     const status = call('om_status');
     expect(status).toContain(`source: pi-session — ${file}`);
+    expect(status).toContain(`session: ${S}`); // header id visible next to source (A3)
     expect(status).toContain('active observations: 1');
     expect(status).toContain('session cost: $0.012');
 
@@ -138,19 +228,52 @@ describe('MCP tools over a pi session (M5)', () => {
     const sessions = path.join(dir, 'sessions', '--tmp--');
     mkdirSync(sessions, { recursive: true });
     const piFile = path.join(sessions, 'd.jsonl');
-    writePiSession(piFile);
+    writePiSession(piFile, S);
     process.env.OM_MCP_PI_SESSIONS_DIR = path.join(dir, 'sessions');
     expect(call('om_status')).toContain(`source: pi-session — ${piFile}`);
     expect(call('om_recall', { query: 'sqlite storage' })).toContain('[observation]');
+
+    // A3: foreign session id → auto-scan must NOT pick it (OM_MCP_SESSION is the cross-check)
+    process.env.OM_MCP_SESSION = 'some-other-session';
+    expect(call('om_status')).toContain('source: embedded —');
+  });
+
+  it('A3: two projects — OM_MCP_SESSION selects the matching session, foreign id falls back to embedded', () => {
+    const sessions = path.join(dir, 'sessions');
+    const aDir = path.join(sessions, '--tmp-a--');
+    const bDir = path.join(sessions, '--tmp-b--');
+    for (const d of [aDir, bDir]) mkdirSync(d, { recursive: true });
+    const foreign = path.join(aDir, 'foreign.jsonl'); // newest mtime, id 'sess-a'
+    const own = path.join(bDir, 'own.jsonl'); // older, id 'sess-b'
+    writePiSession(foreign, 'sess-a');
+    writePiSession(own, 'sess-b');
+    const t = (ms: number) => new Date(ms);
+    utimesSync(foreign, t(2000), t(2000));
+    utimesSync(own, t(1000), t(1000));
+
+    // (a) OM_MCP_SESSION = the second (older) session → it wins over the newer foreign one
+    process.env.OM_MCP_SESSION = 'sess-b';
+    process.env.OM_MCP_PI_SESSIONS_DIR = sessions;
+    expect(call('om_status')).toContain(`source: pi-session — ${own}`);
+    expect(call('om_status')).toContain('session: sess-b');
+
+    // (b) OM_MCP_SESSION set but no matching pi file → embedded fallback with source marker
+    process.env.OM_MCP_SESSION = 'sess-c';
+    expect(call('om_status')).toContain('source: embedded —');
+
+    // explicit path with foreign id is rejected too → embedded
+    process.env.OM_MCP_SESSION = 'sess-c';
+    process.env.OM_MCP_PI_SESSION = own;
+    expect(call('om_status')).toContain('source: embedded —');
   });
 
   it('explicit OM_MCP_PI_SESSION wins over the scan; invalid explicit falls back to embedded', () => {
     const sessions = path.join(dir, 'sessions', '--tmp--');
     mkdirSync(sessions, { recursive: true });
     const scannedFile = path.join(sessions, 'scanned.jsonl');
-    writePiSession(scannedFile);
+    writePiSession(scannedFile, S);
     const explicitFile = path.join(dir, 'explicit.jsonl');
-    writePiSession(explicitFile);
+    writePiSession(explicitFile, S);
     process.env.OM_MCP_PI_SESSION = explicitFile;
     process.env.OM_MCP_PI_SESSIONS_DIR = path.join(dir, 'sessions');
     expect(call('om_status')).toContain(`source: pi-session — ${explicitFile}`);
@@ -167,7 +290,7 @@ describe('MCP tools over a pi session (M5)', () => {
     mkdirSync(sdir, { recursive: true });
     writeFileSync(path.join(sdir, 'Db.md'), '---\ntopic: Db\n---\nnotes\n');
     const file = path.join(dir, 'pi.jsonl');
-    writePiSession(file);
+    writePiSession(file, S);
     process.env.OM_MCP_PI_SESSION = file;
     const text = call('om_topics');
     expect(text).toContain('Db');

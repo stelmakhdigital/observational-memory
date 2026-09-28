@@ -220,6 +220,13 @@ OM_MCP_ROOT=<memory root> OM_MCP_SESSION=<sessionId> npm run mcp
 3. fallback — embedded `<root>/<sessionId>/ledger.jsonl` (для встроенного
    адаптера без pi).
 
+**Сверка по session id:** при заданном `OM_MCP_SESSION` pi-файл принимается
+(и по явном пути, и в авто-скане) только если id в его header-строке
+(`{"type":"session","id":"..."}`) совпадает с `OM_MCP_SESSION` — иначе сервер
+отвечает по embedded-ledger, а не по чужой сессии соседнего проекта.
+`om_status` показывает, чья именно сессия: `source: pi-session — <file>` +
+`session: <id>` (или `source: embedded — <file>`).
+
 Это важно: pi-адаптер хранит ledger **внутри файла pi-сессии**
 (`~/.pi/agent/sessions/<cwd-encoded>/*.jsonl`, entries `customType: "om"`),
 а не в `ledger.jsonl` — без пунктов 1–2 MCP видел бы 0 наблюдений pi-сессий.
@@ -228,9 +235,9 @@ OM_MCP_ROOT=<memory root> OM_MCP_SESSION=<sessionId> npm run mcp
 topic-файлы из memory root.
 
 Ограничения (known limitations): pi-режим строго **read-only**; читается
-**одна** сессия (указанная или последняя); pi-файл сессии — линейная история,
-branch-семантика pi при ветвлении (`/tree`) **не** реконструируется — видны
-entries всех веток.
+**одна** сессия (совпадающая по id с `OM_MCP_SESSION`); pi-файл сессии —
+линейная история, branch-семантика pi при ветвлении (`/tree`) **не**
+реконструируется — видны entries всех веток.
 
 Транспорт — JSON-RPC 2.0 over stdio (MCP-протокол: initialize/tools/list/tools/call).
 Публичный экспорт: `@stelmakhdigital/observational-memory/adapters/mcp`.

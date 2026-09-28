@@ -77,13 +77,33 @@ export class PiSessionLedger implements LedgerStore {
   }
 }
 
+/**
+ * Read `len` bytes starting at `from`, looping while a single readSync call
+ * may return fewer (short read) — without the loop a partial last read is
+ * zero-filled and the freshest (tail) line becomes corrupt and is dropped.
+ * Returns fewer bytes than `len` only at EOF. `read` is injectable for tests.
+ */
+export function readAllSync(
+  fd: number,
+  from: number,
+  len: number,
+  read: (fd: number, buf: Buffer, offset: number, length: number, position: number) => number,
+): Buffer {
+  const out = Buffer.alloc(len);
+  let off = 0;
+  while (off < len) {
+    const n = read(fd, out, off, len - off, from + off);
+    if (n <= 0) break; // EOF
+    off += n;
+  }
+  return off < len ? out.subarray(0, off) : out;
+}
+
 function readRange(file: string, from: number, len: number): string | null {
   try {
     const fd = openSync(file, 'r');
     try {
-      const buf = Buffer.alloc(len);
-      readSync(fd, buf, 0, len, from);
-      return buf.toString('utf8');
+      return readAllSync(fd, from, len, readSync).toString('utf8');
     } finally {
       closeSync(fd);
     }
@@ -93,17 +113,53 @@ function readRange(file: string, from: number, len: number): string | null {
 }
 
 /**
+ * Session id from the first JSONL line — pi writes a header like
+ * {"type":"session","version":3,"id":"<uuid>","timestamp":...,"cwd":...}.
+ * Returns null when the file/header is missing or the first line is not a
+ * session header (NFR-1: corrupt heads never throw).
+ */
+export function readPiSessionId(file: string): string | null {
+  try {
+    const { size } = statSync(file);
+    if (size === 0) return null;
+    const head = readRange(file, 0, Math.min(size, 8192));
+    if (!head) return null;
+    const nl = head.indexOf('\n');
+    const first = nl === -1 ? head : head.slice(0, nl);
+    const h = JSON.parse(first) as { type?: string; id?: string };
+    return h.type === 'session' && typeof h.id === 'string' ? h.id : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface PiLedgerResult {
+  store: PiSessionLedger;
+  omEntries: number;
+  /** Session id from the header line, null when the header is missing. */
+  sessionId: string | null;
+}
+
+/**
  * Parse a pi session JSONL into a read-only ledger. Returns null when the
- * file is missing/unreadable or contains no valid om.* entries.
+ * file is missing/unreadable, contains no valid om.* entries, or — when
+ * `expectedSessionId` is given — its header session id differs (a foreign
+ * project's session must never be answered from). Reads the TAIL (last
+ * READ_BYTES): fresh om entries are appended at the end of the file; for
+ * files larger than READ_BYTES the window may start mid-line, and that
+ * partial first line is skipped like any corrupt line.
  * Garbage lines (crash tails, foreign tools) are skipped, never thrown.
  */
-export function readPiLedger(file: string): { store: PiSessionLedger; omEntries: number } | null {
+export function readPiLedger(file: string, expectedSessionId?: string): PiLedgerResult | null {
+  const sessionId = readPiSessionId(file);
+  if (expectedSessionId !== undefined && sessionId !== expectedSessionId) return null;
   let raw: string;
   try {
     const { size } = statSync(file);
-    const len = Math.min(size, READ_BYTES);
-    const r = readRange(file, 0, len);
-    if (r === null || len === 0) return null;
+    if (size === 0) return null;
+    const from = Math.max(0, size - READ_BYTES);
+    const r = readRange(file, from, size - from);
+    if (r === null) return null;
     raw = r;
   } catch {
     return null;
@@ -135,7 +191,7 @@ export function readPiLedger(file: string): { store: PiSessionLedger; omEntries:
     });
   }
   if (entries.length === 0) return null;
-  return { store: new PiSessionLedger(entries), omEntries: entries.length };
+  return { store: new PiSessionLedger(entries), omEntries: entries.length, sessionId };
 }
 
 function collectJsonl(dir: string, out: string[]): void {
@@ -155,10 +211,12 @@ function collectJsonl(dir: string, out: string[]): void {
 /**
  * Find the most recent session file (by mtime) containing om entries under
  * `sessionsDir` (typically ~/.pi/agent/sessions). Only the SCAN_FILE_LIMIT
- * newest .jsonl files are checked (tail read, SCAN_BYTES each). Returns null
- * when nothing matches or the dir is missing.
+ * newest .jsonl files are checked (tail read, SCAN_BYTES each). When
+ * `expectedSessionId` is given, files whose header session id differs are
+ * skipped (a foreign project's session must never win the auto-scan).
+ * Returns null when nothing matches or the dir is missing.
  */
-export function scanForPiSession(sessionsDir: string): string | null {
+export function scanForPiSession(sessionsDir: string, expectedSessionId?: string): string | null {
   if (!existsSync(sessionsDir)) return null;
   const files: string[] = [];
   collectJsonl(sessionsDir, files);
@@ -167,6 +225,7 @@ export function scanForPiSession(sessionsDir: string): string | null {
     .sort((a, b) => b.mtime - a.mtime)
     .slice(0, SCAN_FILE_LIMIT);
   for (const { f } of newest) {
+    if (expectedSessionId !== undefined && readPiSessionId(f) !== expectedSessionId) continue;
     let size: number;
     try {
       size = statSync(f).size;
