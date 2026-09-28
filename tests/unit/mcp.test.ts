@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -64,6 +64,34 @@ describe('MCP server (v0.7)', () => {
     expect(handleMcpRequest({ jsonrpc: '2.0', method: 'notifications/initialized' })).toBeNull();
   });
 
+  // A11: ANY notification (not just initialized) must get no reply, and the
+  // stdio transport already skips writing null — verified here via the
+  // dispatcher contract: res === null ⇒ nothing written to stdout.
+  it('notifications/cancelled and other notifications get no reply (A11)', () => {
+    expect(handleMcpRequest({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 5 } })).toBeNull();
+    expect(handleMcpRequest({ jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: 1 } })).toBeNull();
+    // and the transport must not write for them
+    const writes: string[] = [];
+    const origWrite = process.stdout.write.bind(process.stdout);
+    vi.spyOn(process.stdout, 'write').mockImplementation(((s: string) => {
+      writes.push(String(s));
+      return true;
+    }) as typeof process.stdout.write);
+    // re-dispatch through the same rule the transport uses
+    for (const line of ['{"jsonrpc":"2.0","method":"notifications/cancelled"}', '{"jsonrpc":"2.0","method":"notifications/progress","params":{}}']) {
+      const res = handleMcpRequest(JSON.parse(line));
+      if (res !== null) writes.push(JSON.stringify(res));
+    }
+    vi.restoreAllMocks();
+    expect(writes).toEqual([]);
+    void origWrite;
+  });
+
+  it('ping → empty result (A11)', () => {
+    const res = handleMcpRequest({ jsonrpc: '2.0', id: 7, method: 'ping' }) as { result: unknown };
+    expect(res.result).toEqual({});
+  });
+
   it('unknown method → -32601', () => {
     const res = handleMcpRequest({ jsonrpc: '2.0', id: 2, method: 'nope' }) as {
       error: { code: number };
@@ -93,6 +121,23 @@ describe('MCP server (v0.7)', () => {
       expect(text).toContain('active observations: 1');
       expect(text).toContain('Stack');
       expect(text).toContain('session cost: $0.000');
+    });
+
+    it('om_status reads the ledger exactly once (A16)', () => {
+      // seed 5 entry types so any per-type shortcut in toolStatus would show
+      const store = new FileLedgerStore({ file: defaultLedgerFile(dir, S), lock: false });
+      const at = '2026-01-05T01:00:00Z';
+      store.append({ type: 'om.tombstone', data: { observationIds: [], topics: [], journeyChanged: false }, at });
+      store.append({ type: 'om.cost', data: { runId: 'r1', role: 'observer', usd: 0.0021, at }, at });
+      store.append({ type: 'om.lastError', data: { message: 'boom', at }, at });
+      store.append({ type: 'om.gap-marker', data: { id: 'g1', at, humanDuration: '1 мин', ms: 60000 }, at });
+      const spy = vi.spyOn(FileLedgerStore.prototype, 'read');
+      const text = call('om_status');
+      expect(text).toContain('active observations: 1');
+      expect(text).toContain('session cost: $0.002 (1 runs)');
+      expect(text).toContain('last error: boom');
+      expect(spy).toHaveBeenCalledTimes(1);
+      spy.mockRestore();
     });
 
     it('om_recall finds the observation and the topic', () => {

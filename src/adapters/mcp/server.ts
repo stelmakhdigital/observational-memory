@@ -51,7 +51,7 @@ import { MemoryStore } from '../../core/memory-store.js';
 import { foldPool } from '../../core/ledger/pool.js';
 import { sumCosts } from '../../core/cost.js';
 import { estimateTokens } from '../../core/tokens.js';
-import type { LedgerStore } from '../../core/types.js';
+import type { LedgerEntryType, LedgerStore, TypedLedgerEntry } from '../../core/types.js';
 import { readPiLedger, scanForPiSession } from './pi-ledger.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
@@ -170,13 +170,18 @@ function initState(): McpState {
 }
 
 function toolStatus(s: McpState): ToolResult {
-  const obsAll = s.ledger.read('om.observation').map((e) => e.data);
-  const tombstones = s.ledger.read('om.tombstone');
+  // A16: one ledger read, local filters — embedded stores re-read the whole
+  // file per read(type) call, and 5 calls here was pure waste.
+  const all = s.ledger.read();
+  const of = <T extends LedgerEntryType>(type: T): TypedLedgerEntry<T>[] =>
+    all.filter((e) => e.type === type) as TypedLedgerEntry<T>[];
+  const obsAll = of('om.observation').map((e) => e.data);
+  const tombstones = of('om.tombstone');
   const removed = new Set(tombstones.flatMap((t) => t.data.observationIds));
   const active = obsAll.filter((o) => !removed.has(o.id));
   const activeTokens = active.reduce((t, o) => t + o.tokenCount, 0);
-  const costs = sumCosts(s.ledger.read('om.cost'));
-  const lastErr = s.ledger.read('om.lastError');
+  const costs = sumCosts(of('om.cost'));
+  const lastErr = of('om.lastError');
   const topics = s.memory.listTopics(s.sessionId);
   const journey = s.memory.readJourney(s.sessionId);
   const text = [
@@ -245,6 +250,8 @@ interface JsonRpcRequest {
  * or null for notifications (no reply expected).
  */
 export function handleMcpRequest(req: JsonRpcRequest): unknown | null {
+  // A11: JSON-RPC/MCP notifications expect NO reply (writing one confuses clients).
+  if (req.method?.startsWith('notifications/')) return null;
   const id = req.id ?? null;
   const fail = (code: number, message: string) => ({
     jsonrpc: '2.0',
@@ -262,7 +269,7 @@ export function handleMcpRequest(req: JsonRpcRequest): unknown | null {
       },
     };
   }
-  if (req.method === 'notifications/initialized' || req.method === 'initialized') return null;
+  if (req.method === 'ping') return { jsonrpc: '2.0', id, result: {} };
   if (req.method === 'tools/list') {
     return { jsonrpc: '2.0', id, result: { tools: TOOLS } };
   }
