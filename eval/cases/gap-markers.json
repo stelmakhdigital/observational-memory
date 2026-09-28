@@ -1,0 +1,21 @@
+{
+  "id": "gap-markers",
+  "description": "Gap markers (R2/FR-8 regression): the session has a 2-DAY pause between turn 3 and turn 4 (gapBeforeMs on the resuming turn). With gapMarkers: true the harness enables markers (1h threshold) and calls onAgentEnd per turn with real per-turn timestamps; the assertion is an om.gap-marker ledger entry (pause detected and recorded). Also: facts from BEFORE the pause (ClickHouse) and AFTER it (v1.4, /v1/export in the resuming turn) must both survive observation — the gap turn lands inside the observed chunk. Regresses: gap-marker detection on real message timestamps (lastTwoMessageAts), not wall-clock run duration; pause-survival of facts across a resumed session.",
+  "gapMarkers": true,
+  "turns": [
+    "user: Привет, возвращаемся к аналитике. Запомни ключевые решения: база данных — ClickHouse, хранилище данных лежит в папке warehouse/, загрузка данных — через Kafka, батчи раз в минуту.",
+    "assistant: Принято: ClickHouse, папка warehouse/, загрузка через Kafka раз в минуту. Продолжаем с дашбордов?",
+    "user: Верно. Добавь метрики: p95 latency, DAU, error rate. Дашборды ведём в Grafana, файлы панелей храним в каталоге dashboards/ с понятными именами.",
+    {
+      "gapBeforeMs": 172800000,
+      "text": "user: Доброе утро, продолжаем после длинной паузы. Кстати: вчера выпустили v1.4 в прод, все инциденты закрыты. Теперь добавь экспорт отчётов в CSV, эндпоинт — /v1/export, формат — один файл на день."
+    },
+    "assistant: Принято: v1.4 выпущен, экспорт в CSV добавлен на /v1/export, панели Grafana обновил.",
+    "user: Спасибо, продолжим завтра. Пока всё."
+  ],
+  "expectedFacts": [
+    "ClickHouse",
+    "v1.4",
+    "/v1/export"
+  ]
+}

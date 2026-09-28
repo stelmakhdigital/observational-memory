@@ -1,0 +1,15 @@
+{
+  "id": "tail-race",
+  "description": "E1 regression (tail race at shutdown, deterministic variant): at the LAST onTurnEnd (turn 3) only ~142 tokens exist — below the 150-token chunk threshold, so NO chunk is ever emitted during the loop. Turn 4 (~66 tokens, carries the facts) is appended WITHOUT onTurnEnd (noPumpLastTurns: 1) and the session shuts down immediately: total 208 >= 150, so the ONLY path that can observe the facts is the shutdown final pump (E1 fix: 'history GREW since the last pump -> one final pump' in shutdown()). Before the fix this case loses 100% of its facts (zero observations); after the fix both must land in memory. Regresses: observations accumulated after the final onTurnEnd surviving to memory at graceful shutdown.",
+  "noPumpLastTurns": 1,
+  "turns": [
+    "user: Начинаем новый проект: сервис учёта товаров (inventory). Стек зафиксирован: TypeScript strict mode, pnpm, тесты — vitest, линтер — oxlint. Код — в src/, тесты — в tests/, CI прогоняет pnpm test на каждый коммит.",
+    "user: Верно. Модуль авторизации живёт в src/auth/, JWT с ротацией refresh-токенов, логика ротации — в src/auth/rotate.ts. Правило: никогда не пушим в master напрямую, изменения только через PR с review.",
+    "user: Не забудь: деплой сначала в staging, потом в прод. Dockerfile мультистейдж, образ собирается в пакете packages/docker, тег — по ветке и хэшу коммита.",
+    "user: И главное решение за сегодня, запиши его обязательно: основная база данных — PostgreSQL, схема лежит в db/migrations/, инструмент миграций — пайпер. Эндпоинт запросов к товарам — /v1/inventory, авторизация — Bearer-токен. Отсюда завтра продолжим, так что это важно."
+  ],
+  "expectedFacts": [
+    "postgres",
+    "/v1/inventory"
+  ]
+}

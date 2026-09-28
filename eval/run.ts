@@ -13,7 +13,15 @@
  *    the rendered OM block size is reported (`block Ntok`) and early-history
  *    facts must survive in memory, not in the raw context;
  *  - compression: raw history tokens vs memory corpus tokens;
- *  - cost: USD of all background LLM runs for the session.
+ *  - cost: USD of all background LLM runs for the session;
+ *  - wall-time: per-case and total wallMs (with a local $0 model the cost
+ *    metric is useless, wall-time is the real performance signal);
+ *  - recall: BM25 recallSearch() over the memory corpus (cross-lingual
+ *    cases) — a second, non-substring measurement mechanism;
+ *  - gap-markers: `gapMarkers: true` enables markers (1h threshold) and
+ *    onAgentEnd per turn; the om.gap-marker ledger entry is the assertion;
+ *  - tail-race (E1): `noPumpLastTurns: N` appends the last N turns WITHOUT
+ *    onTurnEnd — the shutdown final pump must still observe them.
  *
  * Case design rules (learned the hard way):
  *  - a case's total must be >= chunkTokens (150) or NOTHING gets observed;
@@ -40,21 +48,31 @@ import {
   buildSessionRecallDocs,
   createOmSession,
   estimateTokens,
+  recallSearch,
   sumCosts,
   type OmSession,
 } from '../src/core/index.js';
 import { DemoHistory } from '../src/core/testing.js';
 import { PiSubprocessRunner } from '../src/adapters/pi/runner.js';
 
+/** A turn: plain text, or an object with an explicit pause before it (gap-markers case). */
+type EvalTurn = string | { text: string; /** Pause before this turn, ms (gap-markers case). */ gapBeforeMs?: number };
+
 interface EvalCase {
   id: string;
   description?: string;
-  turns: string[];
+  turns: EvalTurn[];
   expectedFacts: Array<string | string[]>;
   /** Poison test: substrings that must NOT appear in the memory corpus. */
   forbiddenFacts?: Array<string | string[]>;
   /** Trigger compaction: low compactAtContextTokens for this case. */
   compact?: boolean;
+  /** Gap-markers case: enable markers (1h threshold) + onAgentEnd per turn; expect >= 1 om.gap-marker. */
+  gapMarkers?: boolean;
+  /** E1 tail-race case: the last N turns are appended WITHOUT onTurnEnd before shutdown. */
+  noPumpLastTurns?: number;
+  /** Cross-lingual recall: recallSearch() queries over the memory corpus; ok if any alt gets >= 1 hit. */
+  recallQueries?: Array<{ query: string; alts?: string[] }>;
 }
 
 interface CaseReport {
@@ -67,6 +85,16 @@ interface CaseReport {
   topics: number;
   extracted: string[];
   costUsd: number;
+  /** Wall-time of the whole case (turns + forced phases + drain), ms. */
+  wallMs: number;
+  /** Distinct committed observer chunks (sourceRange.toId). */
+  chunkCount: number;
+  /** History tokens covered by committed observations (up to the max watermark). */
+  observedTokens: number;
+  /** om.gap-marker ledger entries (gap-markers case: must be >= 1). */
+  gapMarkersFound: number;
+  /** recallSearch() results (cross-lingual case). */
+  recall: Array<{ query: string; hits: number; ok: boolean }>;
   facts: Array<{ fact: string; found: boolean; where: string[] }>;
   forbidden: Array<{ fact: string; leaked: boolean; where: string[] }>;
   compactionBlockTokens: number | null;
@@ -108,6 +136,7 @@ async function runCase(evalCase: EvalCase, root: string): Promise<CaseReport> {
     debug: (m) => log('worker:', m),
   });
 
+  const t0 = Date.now();
   const session: OmSession = createOmSession({
     root,
     sessionId: evalCase.id,
@@ -122,7 +151,8 @@ async function runCase(evalCase: EvalCase, root: string): Promise<CaseReport> {
       journeyTargetTokens: 400,
       observerConcurrency: 2,
       reflector: { enabled: false, idleMs: 60_000, minIntervalMs: 3_600_000 },
-      gapMarkers: { enabled: false, thresholdMs: 600_000 },
+      // gap-markers case: enabled with a 1h threshold (others: off, as before)
+      gapMarkers: { enabled: !!evalCase.gapMarkers, thresholdMs: 3_600_000 },
       earlyActivation: { enabled: false, idleMs: 60_000, minUnobservedTokens: 300 },
       models: { observer: { id: observerModel }, consolidator: { id: consolidatorModel } },
     },
@@ -131,9 +161,26 @@ async function runCase(evalCase: EvalCase, root: string): Promise<CaseReport> {
 
   const errors: string[] = [];
   session.orchestrator.setEnabled(true);
+  const noPump = evalCase.noPumpLastTurns ?? 0;
+  // gap-markers case: explicit per-turn timestamps (all at base, except the
+  // paused turn) so detectGap measures a REAL pause between messages.
+  const baseAt = evalCase.gapMarkers ? Date.now() - 30 * 86_400_000 : null;
+  let offsetMs = 0;
   for (let i = 0; i < evalCase.turns.length; i++) {
-    history.add(evalCase.turns[i]!);
-    session.orchestrator.onTurnEnd();
+    const raw = evalCase.turns[i]!;
+    const turn = typeof raw === 'string' ? { text: raw } : raw;
+    offsetMs += turn.gapBeforeMs ?? 0;
+    history.add(turn.text, baseAt !== null ? new Date(baseAt + offsetMs) : undefined);
+    // E1 tail-race: the last N turns are appended WITHOUT onTurnEnd — the
+    // shutdown final pump is the ONLY path that can observe them.
+    if (i < evalCase.turns.length - noPump) {
+      session.orchestrator.onTurnEnd();
+    } else {
+      log(`tail-race: no onTurnEnd after turn ${i + 1}`);
+    }
+    // gap-markers case: onAgentEnd per turn (detectGap measures the pause
+    // between the last two messages at agent end).
+    if (evalCase.gapMarkers) await session.orchestrator.onAgentEnd();
     // give workers a beat to commit before the next slice is eligible
     await new Promise((r) => setTimeout(r, 1500));
   }
@@ -153,6 +200,25 @@ async function runCase(evalCase: EvalCase, root: string): Promise<CaseReport> {
   const memoryTokens = docs.reduce((s, d) => s + estimateTokens(d.text), 0);
   const corpus = normalize(docs.map((d) => d.text).join('\n'));
   const topics = session.memory.listTopics(evalCase.id);
+
+  // Diagnostics: distinct committed chunks + history tokens they cover.
+  const toIds = [...new Set(allObs.map((o) => o.sourceRange?.toId).filter((x): x is string => !!x))];
+  const maxToId = toIds.length > 0 ? toIds.reduce((a, b) => (a < b ? b : a)) : null;
+  const observedTokens = maxToId
+    ? history.messages.filter((m) => m.id <= maxToId).reduce((s, m) => s + (m.tokens ?? 0), 0)
+    : 0;
+
+  // Gap-markers case: the pause must be recorded as an om.gap-marker entry.
+  const gapMarkersFound = ledger.read('om.gap-marker').length;
+
+  // Cross-lingual recall: BM25 recallSearch() over the memory corpus (NOT a
+  // substring over the raw history). ok if any alternative query gets a hit.
+  const recall = (evalCase.recallQueries ?? []).map((rq) => {
+    const alts = [rq.query, ...(rq.alts ?? [])];
+    let best = 0;
+    for (const a of alts) best = Math.max(best, recallSearch(docs, a, { limit: 5 }).length);
+    return { query: rq.query, hits: best, ok: best > 0 };
+  });
 
   const facts = evalCase.expectedFacts.map((factOrAlts) => {
     // a fact may carry alternative spellings (string[] — any-of), e.g. a
@@ -199,6 +265,11 @@ async function runCase(evalCase: EvalCase, root: string): Promise<CaseReport> {
     topics: topics.length,
     extracted: session.memory.listExtracted(evalCase.id),
     costUsd: sumCosts(ledger.read('om.cost')).totalUsd,
+    wallMs: Date.now() - t0,
+    chunkCount: toIds.length,
+    observedTokens,
+    gapMarkersFound,
+    recall,
     facts,
     forbidden,
     compactionBlockTokens,
@@ -226,15 +297,20 @@ async function main(): Promise<void> {
     process.stdout.write(
       `facts ${r.facts.filter((f) => f.found).length}/${r.facts.length}, ` +
       `obs ${r.observations}, topics ${r.topics}, ` +
-      `${r.historyTokens}→${r.memoryTokens} tokens (×${r.compression}), ` +
+      (r.recall.length > 0 ? `recall ${r.recall.filter((f) => f.ok).length}/${r.recall.length}, ` : '') +
+      (c.gapMarkers ? `gaps ${r.gapMarkersFound > 0 ? '✓' : '✗'}, ` : '') +
+      `${r.historyTokens}→${r.memoryTokens} tokens (×${r.compression}, obs ${r.observedTokens}/${r.chunkCount}ch), ` +
       (r.forbidden.length > 0
         ? `poison ${r.forbidden.filter((f) => !f.leaked).length}/${r.forbidden.length} blocked, `
         : '') +
       (r.compactionBlockTokens !== null ? `block ${r.compactionBlockTokens}tok, ` : '') +
-      `$${r.costUsd.toFixed(3)}\n`,
+      `wall ${(r.wallMs / 1000).toFixed(1)}s, $${r.costUsd.toFixed(3)}\n`,
     );
     for (const f of r.facts) {
       console.log(`    ${f.found ? '✓' : '✗'} ${f.fact}${f.found ? ` [${f.where.join(', ')}]` : ''}`);
+    }
+    for (const f of r.recall) {
+      console.log(`    ${f.ok ? '✓' : '✗'} recall "${f.query}" → ${f.hits} hit(s)`);
     }
     for (const f of r.forbidden) {
       console.log(`    ${f.leaked ? '✗ LEAK' : '✓ blocked'} ${f.fact}${f.leaked ? ` [${f.where.join(', ')}]` : ''}`);
@@ -247,18 +323,29 @@ async function main(): Promise<void> {
       : null;
   const totalCost = reports.reduce((s, r) => s + r.costUsd, 0);
   const totalLeaks = reports.reduce((s, r) => s + r.forbidden.filter((f) => f.leaked).length, 0);
+  const totalWallMs = reports.reduce((s, r) => s + r.wallMs, 0);
+  const recallTotals = reports.flatMap((r) => r.recall);
+  const gapFailures = reports.filter(
+    (r, i) => cases[i]!.gapMarkers && r.gapMarkersFound < 1,
+  ).length;
   const summary = {
     at: new Date().toISOString(),
     model: process.env.OM_EVAL_MODEL ?? 'claude-sonnet-4-6',
     avgFactSurvival: avgSurvival,
     poisonLeaks: totalLeaks,
     totalCostUsd: Math.round(totalCost * 10000) / 10000,
+    totalWallMs,
+    recallOk: recallTotals.filter((f) => f.ok).length,
+    recallTotal: recallTotals.length,
+    gapFailures,
     reports,
   };
   writeFileSync(path.join(CASES_DIR, '..', 'report.json'), JSON.stringify(summary, null, 2) + '\n', 'utf8');
   console.log(
     `\nAverage fact survival: ${avgSurvival} · poison leaks: ${totalLeaks} · ` +
-    `total cost: $${totalCost.toFixed(3)} · report: eval/report.json\n`,
+    `recall ${recallTotals.filter((f) => f.ok).length}/${recallTotals.length} · ` +
+    `gap failures: ${gapFailures} · ` +
+    `total cost: $${totalCost.toFixed(3)} · wall: ${(totalWallMs / 1000).toFixed(1)}s · report: eval/report.json\n`,
   );
   rmSync(tmp, { recursive: true, force: true });
 }

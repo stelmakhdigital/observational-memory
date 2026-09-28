@@ -1,0 +1,22 @@
+{
+  "id": "cross-lingual",
+  "description": "Cross-lingual recall (E2 regression): the session mixes RU and EN facts, and the check is recallSearch() (BM25 over the memory corpus, NOT substring over the raw history): the RU fact 'таймзона UTC+5' must be found by the EN query 'timezone', and the EN fact 'tabs, not spaces' by the RU queries 'вкладки'/'табы'. HONEST NOTE: without the RU<->EN dictionary bridge (parallel agent's job) the cross-language queries return 0 hits and this case FAILS — that failure is expected and documents the requirement; the substring expectedFacts (UTC+5, tabs) verify plain observation survival independently of the bridge.",
+  "turns": [
+    "user: Привет, работаем над этим проектом. Важное: моя таймзона — UTC+5 (Уфа), все встречи, алерты и cron-задачи назначай в этой таймзоне, не в UTC.",
+    "assistant: Принято: таймзона UTC+5 (Уфа), cron и встречи — в ней, не UTC.",
+    "user: Правило форматирования: в этом репозитории используй вкладки (tabs), а не пробелы, для всего кода. Проверь конфиг редактора и линтера.",
+    "assistant: Понял: tabs, not spaces, во всём коде этого репозитория.",
+    "user: И ещё: деплой только через staging, прямой деплой в прод запрещён до code review, это жёсткое правило команды.",
+    "assistant: Записал: staging-first, прямой прод-деплой запрещён до code review.",
+    "user: Пока всё, продолжим завтра.",
+    "assistant: Принято, продолжим завтра."
+  ],
+  "expectedFacts": [
+    "UTC+5",
+    "tabs"
+  ],
+  "recallQueries": [
+    { "query": "timezone" },
+    { "query": "вкладки", "alts": ["вкладки", "табы"] }
+  ]
+}
