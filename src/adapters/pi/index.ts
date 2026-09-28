@@ -314,14 +314,18 @@ export default function observationalMemory(pi: PiApi): OmExtension {
     // Early activation (v2): the prompt cache is invalidated anyway.
     track(ctx).orch.onModelChange();
   });
-  pi.on('session_before_compact', (event, ctx) => {
+  pi.on('session_before_compact', async (event, ctx) => {
     const r = track(ctx);
     if (!r.orch.isEnabled()) return; // default pi compaction when OM is off
     const prep: PiCompactPreparation = (event as { preparation?: PiCompactPreparation })?.preparation ?? {
       firstKeptEntryId: '',
       tokensBefore: 0,
     };
-    // Wait for in-flight observers so the block is complete (best effort).
+    // A5: the hook is async (pi awaits it) — quiescently wait for in-flight
+    // observers so the rendered block is complete. The old synchronous
+    // render ("best effort") raced pending commits and silently dropped
+    // their observations from the summary.
+    await r.orch.drainForCompaction();
     const { block, tailBoundaryId } = r.orch.compactionPlan();
     return {
       compaction: {
@@ -378,11 +382,17 @@ export default function observationalMemory(pi: PiApi): OmExtension {
       if (!r.orch.isEnabled()) {
         return { content: [{ type: 'text', text: 'Observational memory is off (enable with /om on).' }], details: {} };
       }
-      const text = r.orch.recallText(params.query, {
-        limit: params.limit,
-        since: params.since,
-        until: params.until,
-      });
+      let text: string;
+      try {
+        text = r.orch.recallText(params.query, {
+          limit: params.limit,
+          since: params.since,
+          until: params.until,
+        });
+      } catch (e) {
+        // R7: invalid since/until throws OmError — surface as tool text.
+        return { content: [{ type: 'text', text: `om_recall error: ${e instanceof Error ? e.message : String(e)}` }], details: {} };
+      }
       return { content: [{ type: 'text', text }], details: {} };
     },
   });
@@ -472,10 +482,27 @@ export default function observationalMemory(pi: PiApi): OmExtension {
       const rest: string[] = [];
       for (let i = 0; i < tokens.length; i++) {
         const t = tokens[i]!;
-        if (t.toLowerCase() === 'limit') limit = Number(tokens[++i]);
+        if (t.toLowerCase() === 'limit') {
+          const raw = tokens[++i];
+          limit = Number(raw);
+          // A12: "limit" без значения (или нечисло) не должно давать NaN.
+          if (raw === undefined || raw === '' || !Number.isFinite(limit)) {
+            report(ctx, ['Usage: /om:recall <query> [limit N] [since DATE] [until DATE] (limit: positive integer)']);
+            return;
+          }
+        }
         else if (t.toLowerCase() === 'since') since = tokens[++i];
         else if (t.toLowerCase() === 'until') until = tokens[++i];
         else rest.push(t);
+      }
+      // R7: an invalid date now throws from recall (OmError) — surface it as
+      // a usage message instead of crashing the command handler.
+      if (
+        (since !== undefined && since !== '' && Number.isNaN(Date.parse(since))) ||
+        (until !== undefined && until !== '' && Number.isNaN(Date.parse(until)))
+      ) {
+        report(ctx, ['Usage: /om:recall <query> [limit N] [since DATE] [until DATE] (dates: ISO, e.g. 2025-09-21)']);
+        return;
       }
       const query = rest.join(' ');
       if (!query) {

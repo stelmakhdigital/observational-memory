@@ -8,6 +8,7 @@
  * mid-conversation. Temporal queries (since/until) filter observations by
  * their creation time (v0.7).
  */
+import { OmError } from './types.js';
 import type {
   LedgerStore,
   MemoryRoot,
@@ -148,8 +149,28 @@ export function recallSearch(
   opts: RecallOptions = {},
 ): RecallHit[] {
   const includeConsolidated = opts.includeConsolidated ?? true;
-  const since = opts.since ? new Date(opts.since).getTime() : null;
-  const until = opts.until ? new Date(opts.until).getTime() : null;
+  // R7: a bogus date used to become NaN and silently disable the filter
+  // (NaN comparisons are always false → ALL observations pass through).
+  let since: number | null = null;
+  if (opts.since) {
+    since = new Date(opts.since).getTime();
+    if (!Number.isFinite(since)) {
+      throw new OmError(
+        `invalid "since" date: ${opts.since} (expected an ISO date, e.g. 2025-09-21)`,
+        'invalid-since',
+      );
+    }
+  }
+  let until: number | null = null;
+  if (opts.until) {
+    until = new Date(opts.until).getTime();
+    if (!Number.isFinite(until)) {
+      throw new OmError(
+        `invalid "until" date: ${opts.until} (expected an ISO date, e.g. 2025-09-21)`,
+        'invalid-until',
+      );
+    }
+  }
   const filtered = docs.filter((d) => {
     if (d.kind === 'observation') {
       if (d.status === 'consolidated' && !includeConsolidated) return false;

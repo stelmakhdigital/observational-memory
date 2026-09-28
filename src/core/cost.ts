@@ -25,6 +25,9 @@ export function sumCosts(entries: readonly TypedLedgerEntry<'om.cost'>[]): CostS
   for (const e of entries) {
     const c: CostEntry = e.data;
     if (!Number.isFinite(c.usd)) continue; // corrupt: skip (NFR-1)
+    // R6: an unknown role (corrupt/foreign entry) must be skipped, not crash
+    // the sum (`byRole[c.role]` would be undefined → TypeError in /om:status).
+    if (typeof c.role !== 'string' || !(c.role in byRole)) continue;
     totalUsd += c.usd;
     byRole[c.role].usd += c.usd;
     byRole[c.role].runs += 1;

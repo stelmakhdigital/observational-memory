@@ -447,6 +447,28 @@ class FlakyCommitLedger implements LedgerStore {
   }
 }
 
+/**
+ * R3: the SECOND om.observation append (of the first attempt only) throws —
+ * the first observation is committed, the rest are not (partial commit).
+ */
+class PartialCommitLedger implements LedgerStore {
+  private obsAppends = 0;
+  constructor(private inner: MockLedger) {}
+  append<T extends LedgerEntryType>(entry: TypedLedgerEntry<T>): void {
+    if (entry.type === 'om.observation') {
+      this.obsAppends++;
+      if (this.obsAppends === 2) throw new Error('simulated partial-commit failure');
+    }
+    this.inner.append(entry);
+  }
+  read<T extends LedgerEntryType>(type?: T): TypedLedgerEntry<T>[] {
+    return this.inner.read(type);
+  }
+  tombstone(ids: string[], report: Parameters<LedgerStore['tombstone']>[1]): void {
+    this.inner.tombstone(ids, report);
+  }
+}
+
 const okConsolidator = {
   result: (input: WorkerInput): WorkerResult => ({
     runId: input.runId,
@@ -480,6 +502,35 @@ describe('M6: commit failure vs worker failure', () => {
     expect(runner2.calls.filter((c) => c.role === 'observer').length).toBe(1); // NO LLM re-run
     expect(ledger2.read('om.observation').length).toBe(1); // commit retry succeeded
     expect(ledger2.read('om.lastError')).toEqual([]);
+  });
+
+  it('R3: a partial commit (append fails mid-slice) retries WITHOUT duplicating committed observations', async () => {
+    const runner2 = new MockRunner(
+      { result: (i: WorkerInput) => ({ runId: i.runId, ok: true, observations: drafts('a first', 'a second', 'a third') }) },
+      okConsolidator,
+    );
+    const inner = new MockLedger();
+    const ledger2 = new PartialCommitLedger(inner);
+    const orch2 = new OmOrchestrator({
+      config: baseConfig,
+      sessionId: 's-r3',
+      history,
+      ledger: ledger2,
+      runner: runner2,
+      memory,
+      sink,
+    });
+    orch2.setEnabled(true);
+    history.add('m1', 'aaaaaaaaaa');
+    orch2.onTurnEnd();
+    await runner2.drain();
+    await orch2.shutdown();
+
+    const obs = ledger2.read('om.observation');
+    expect(obs.length).toBe(3); // exactly the slice — not 3+3, not a partial
+    expect(obs.map((o) => o.data.content).sort()).toEqual(['a first', 'a second', 'a third']);
+    expect(new Set(obs.map((o) => o.data.id)).size).toBe(3); // no duplicate ids
+    expect(ledger2.read('om.lastError')).toEqual([]); // retry commit succeeded
   });
 
   it('keeps the LLM result in lastError and leaves the slice un-covered when the commit keeps failing', async () => {

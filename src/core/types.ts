@@ -107,6 +107,12 @@ export interface CostEntry {
 export interface GapMarker {
   id: string;
   at: string;
+  /**
+   * Timestamp of the PREVIOUS message (the pause's start point). R9: stored
+   * so a restarted host can restore the gap-marker dedup state from the
+   * ledger (old markers without prevAt fall back to `at`).
+   */
+  prevAt?: string;
   /** Human-readable duration, e.g. "2 дня 3 часа". */
   humanDuration: string;
   /** Milliseconds of the detected gap. */
@@ -348,7 +354,9 @@ export class OmError extends Error {
       | 'runner-failed'
       | 'commit-failed'
       | 'storage-error'
-      | 'not-enabled',
+      | 'not-enabled'
+      | 'invalid-since'
+      | 'invalid-until',
   ) {
     super(message);
     this.name = 'OmError';

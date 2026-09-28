@@ -169,6 +169,16 @@ export class OmOrchestrator {
     this.sessionId = d.sessionId;
     this.now = () => (d.clock ? d.clock.now() : new Date());
     this.log = d.log ?? (() => {});
+    // R9: gap-marker dedup must survive host restarts — restore the already
+    // marked pause from the ledger (the marker stores the previous message
+    // time; older markers without prevAt fall back to their write time).
+    try {
+      const markers = this.d.ledger.read<'om.gap-marker'>('om.gap-marker');
+      const last = markers[markers.length - 1];
+      if (last) this.lastGapMarkedFor = new Date(last.data.prevAt ?? last.at);
+    } catch (e) {
+      this.log(`gap-marker restore failed: ${String(e)}`);
+    }
   }
 
   // ---- gate (FR-7.2) -----------------------------------------------------
@@ -200,11 +210,18 @@ export class OmOrchestrator {
 
   private ensureSeeded(): void {
     if (this.seeded || !this.d.forkParentSessionId) return;
-    this.seeded = true;
     // The seed flag inside seedFrom is the idempotence guard (the session dir
     // itself may already exist, e.g. the ledger created it — FR-4.4).
-    const did = this.d.memory.seedFrom(this.d.forkParentSessionId, this.sessionId);
-    if (did) this.log(`seeded memory from ${this.d.forkParentSessionId}`);
+    // R8: the flag is set only AFTER a successful call — a failing seedFrom
+    // (fs error) must be retried on the next enable; NFR-1: a seed failure
+    // never breaks the master session.
+    try {
+      const did = this.d.memory.seedFrom(this.d.forkParentSessionId, this.sessionId);
+      this.seeded = true;
+      if (did) this.log(`seeded memory from ${this.d.forkParentSessionId}`);
+    } catch (e) {
+      this.log(`seed from ${this.d.forkParentSessionId} failed (will retry on next enable): ${String(e)}`);
+    }
   }
 
   // ---- clocks ------------------------------------------------------------
@@ -358,9 +375,19 @@ export class OmOrchestrator {
     if (parsed.length === 0) return;
     const at = this.now().toISOString();
     const sourceRange = fromId ? { fromId, toId: coversUpToId } : undefined;
-    for (const draft of parsed) {
+    // R3: idempotent commit — if a previous attempt of THIS run committed a
+    // PARTIAL slice before the append failed, those observations are already
+    // in the ledger and must NOT be re-appended under fresh ids (the runId is
+    // unchanged, so foldPool's same-run dedup would not evict them — dups).
+    // Observation ids can't be matched across attempts (the seq counter
+    // advances after every append), so we match by position + text: appends
+    // are sequential, one ledger read, the volume is tiny (one chunk).
+    const committed = this.committedForRun(runId);
+    for (let i = 0; i < parsed.length; i++) {
+      const draft = parsed[i]!;
       const text = (draft?.text ?? '').trim();
       if (!text) continue;
+      if (i < committed.size && committed.has(text)) continue; // R3: already committed
       const { quarantined, matched } = sanitizeObservation(text);
       if (quarantined) this.log(`observation quarantined (injection-like, ${matched})`);
       const lastSeq = this.maxSeqForSecond();
@@ -382,6 +409,15 @@ export class OmOrchestrator {
       });
     }
     this.emitStatus();
+  }
+
+  /** R3: texts this run already committed (partial-commit idempotence). */
+  private committedForRun(runId: string): Set<string> {
+    const committed = new Set<string>();
+    for (const e of this.d.ledger.read<'om.observation'>('om.observation')) {
+      if (e.meta?.runId === runId) committed.add(e.data.content);
+    }
+    return committed;
   }
 
   private maxSeqForSecond(): number {
@@ -567,7 +603,9 @@ export class OmOrchestrator {
     const at = this.now().toISOString();
     this.d.ledger.append({
       type: 'om.gap-marker',
-      data: { id: gapMarkerId(this.now(), seq), at, humanDuration: gap.humanDuration, ms: gap.ms },
+      // R9: prevAt (the pause's start point) is persisted so a restarted host
+      // can restore the dedup state from the ledger.
+      data: { id: gapMarkerId(this.now(), seq), at, prevAt: prevAt.toISOString(), humanDuration: gap.humanDuration, ms: gap.ms },
       at,
     });
     this.d.sink.onGapMarker?.({ at, humanDuration: gap.humanDuration, ms: gap.ms });
@@ -860,6 +898,32 @@ export class OmOrchestrator {
     return { coversUpToId, maxSeq };
   }
 
+  /**
+   * Quiescent drain: wait until NOTHING is in flight. Follow-up workers
+   * spawned while draining are awaited too (entries remove themselves on
+   * settle, so the loop terminates). Shared by shutdown/drainForCompaction.
+   */
+  private async drainInFlight(): Promise<void> {
+    for (;;) {
+      const inflight = this.inFlight.slice();
+      if (inflight.length === 0) break;
+      await Promise.allSettled(inflight.map((r) => r.promise));
+    }
+    this.inFlight = [];
+  }
+
+  /**
+   * A5: quiescently wait for ALL in-flight workers (observers included) so a
+   * compaction block rendered afterwards is complete. Adapters call this
+   * before rendering (session_before_compact); runCompaction has its own
+   * boundary-aware variant (R5 fast path skips tail-only observers).
+   */
+  async drainForCompaction(): Promise<void> {
+    if (!this.enabled) return;
+    await this.drainInFlight();
+    await this.d.runner.drain?.();
+  }
+
   // ---- worker plumbing (NFR-1) ----------------------------------------------
 
   private runWorker(input: WorkerInput, onSuccess: (res: WorkerResult) => void): Promise<void> {
@@ -1026,13 +1090,9 @@ export class OmOrchestrator {
     this.earlyTimer = null;
     if (this.reflectTimer) clearTimeout(this.reflectTimer);
     this.reflectTimer = null;
-    // Quiescent drain (see runCompaction): follow-up workers spawned while
+    // Quiescent drain (see drainInFlight): follow-up workers spawned while
     // draining must be awaited too.
-    for (;;) {
-      const inflight = this.inFlight.slice();
-      if (inflight.length === 0) break;
-      await Promise.allSettled(inflight.map((r) => r.promise));
-    }
+    await this.drainInFlight();
     // E1 (tail race): while an observer was in flight the pump saw only that
     // in-flight slice (the watermark does not move until the commit), so a
     // tail of ≥ chunkTokens arriving after the last pump stays unobserved.
@@ -1052,12 +1112,7 @@ export class OmOrchestrator {
       }
     }
     // Drain the possibly-pumped observer (and any follow-ups it spawned).
-    for (;;) {
-      const inflight = this.inFlight.slice();
-      if (inflight.length === 0) break;
-      await Promise.allSettled(inflight.map((r) => r.promise));
-    }
-    this.inFlight = [];
+    await this.drainInFlight();
     await this.d.runner.drain?.();
   }
 

@@ -87,4 +87,15 @@ describe('sumCosts', () => {
     expect(s.totalUsd).toBe(0);
     expect(s.runs).toBe(0);
   });
+
+  it('R6: unknown roles are skipped, not a TypeError', () => {
+    const alien = {
+      type: 'om.cost',
+      data: { runId: 'r9', role: 'alien', usd: 1, at: '2025-09-21T00:00:00Z' },
+      at: '2025-09-21T00:00:00Z',
+    } as unknown as TypedLedgerEntry<'om.cost'>;
+    const s = sumCosts([alien, cost('r1', 'observer', 0.01)]);
+    expect(s.totalUsd).toBeCloseTo(0.01); // the alien entry is ignored entirely
+    expect(s.runs).toBe(1);
+  });
 });
