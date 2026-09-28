@@ -152,3 +152,8 @@
 | 2026-09 | cfb3f8f | Волна 3 (core): RunManager вынесен из оркестратора (S1), единая payload-валидация + serialize.ts удалён (S3/D1), topKBudgetTokens убран (S7), core/testing subpath (S9), dead code D2-D12 |
 | 2026-09 | 9dd8fec | Волна 3 (pi): index.ts 546→124 (6 модулей, S4), role-таблица runner (S2), walkDir (S5), worker-env (S6), PiContext.mode (S8) |
 | 2026-09 | e5f5d14 | Волна 3 (tests): общие фикстуры mocks.ts (S11), identityEstimate (D13), graft/ в gitignore (D14), ARCHITECTURE eval-зависимость (S10); 345 тестов |
+| 2026-09 | 5f16ff2 | docs: refactoring-analysis.md (4-зонное deep-ревью + live eval, 28 багов, план 5 волн) |
+| 2026-09 | 196d90d | Волна 4 (prompts+recall): язык наблюдений = язык среза (RU/EN), P0-кап, pending-states, preference, секреты; consolidator idempotency; reflector no-op/verbatim; extractor asOf-даты; детерминированный RU/EN словарь-мост в токенизаторе (11 тестов, 356 всего) |
+| 2026-09 | 6edcfde | Волна 5 (docs): README/ARCHITECTURE/REQUIREMENTS синхронизированы с v0.6 (роли, команды, layout, §10.13, journal 2025→2026) |
+| 2026-09 | 41f3a15 | Волна 4 (eval): 3 regression-кейса (gap-markers, cross-lingual recallSearch, tail-race), wallMs-метрики; live-прогон 8 кейсов: survival 0.97, poison 0, recall 2/2 |
+| 2026-09 | 822b023 | **v0.6.0** (тег): волны 1-5 — 22 фикса, рефакторинг (RunManager, 6-модульный адаптер, payload, −topKBudgetTokens), промпты + RU/EN-мост, 356 тестов |
