@@ -44,6 +44,17 @@ export interface RunManagerDeps {
   log: (m: string) => void;
   /** Orchestrator status re-emit after every run-state change. */
   onStatus: () => void;
+  /**
+   * R5: orchestrator invalidates its status cache — RunManager appends
+   * om.run/om.cost/om.lastError entries on the orchestrator's behalf, so
+   * every append here must flush the cache before the next status emit.
+   */
+  onLedgerChange?: () => void;
+  /**
+   * M6/R4: a slice's COMMIT ultimately failed — the orchestrator rolls its
+   * dispatch cursor back so the slice is re-observed on the next pump.
+   */
+  onCommitFailure?: (input: WorkerInput) => void;
 }
 
 /**
@@ -75,6 +86,8 @@ export class RunManager {
   private readonly now: () => Date;
   private readonly log: (m: string) => void;
   private readonly onStatus: () => void;
+  private readonly onLedgerChange: () => void;
+  private readonly onCommitFailure: (input: WorkerInput) => void;
   private _inFlight: InFlight[] = [];
   /**
    * E1 guard: coversUpToId of slices that were attempted but never committed
@@ -91,6 +104,8 @@ export class RunManager {
     this.now = d.now;
     this.log = d.log;
     this.onStatus = d.onStatus;
+    this.onLedgerChange = d.onLedgerChange ?? (() => {});
+    this.onCommitFailure = d.onCommitFailure ?? (() => {});
   }
 
   /** In-flight worker runs (read-only view; mutate only via RunManager). */
@@ -171,6 +186,7 @@ export class RunManager {
       at: startedAt,
       meta: { runId: input.runId },
     });
+    this.onLedgerChange(); // R5: keep the status cache fresh
     this.onStatus();
 
     const attempt = (retriesLeft: number): Promise<void> =>
@@ -217,6 +233,7 @@ export class RunManager {
             data: { message: msg, at },
             at,
           });
+          this.onLedgerChange(); // R5
           this.sink.onError(new OmError(msg, 'runner-failed'));
           this.onStatus();
         });
@@ -240,6 +257,10 @@ export class RunManager {
       this.log(`commit-failure recording failed: ${String(e)}`);
       return;
     }
+    this.onLedgerChange(); // R5
+    // M6/R4: let the orchestrator roll the dispatch cursor back so the slice
+    // is re-observed on the next pump (the LLM result is preserved above).
+    this.onCommitFailure(input);
     this.log(detail);
     this.onStatus();
   }
@@ -259,6 +280,7 @@ export class RunManager {
       at,
       meta: { runId },
     });
+    this.onLedgerChange(); // R5: om.run (and the om.cost below) changed
     // Runs counter (audit, smoke-bug #2): EVERY successful worker run leaves
     // an om.cost mark — even at $0 (free/local models previously showed
     // "(0 runs)"). The cost sum is unaffected (0 + 0 = 0).

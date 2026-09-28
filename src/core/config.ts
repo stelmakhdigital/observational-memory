@@ -106,6 +106,11 @@ export interface OmConfig {
   tailTokens: number;
   /** JOURNEY.md pushed size; oldest segments compressed past this (FR-5.2). */
   journeyTargetTokens: number;
+  /**
+   * Max PARALLEL observers (R4): each pump dispatches up to this many
+   * consecutive history slices at once. 1 = the legacy serial behavior
+   * (one slice per turn, the next after commit).
+   */
   observerConcurrency: number;
   models: {
     /**

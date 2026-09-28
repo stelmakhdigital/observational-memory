@@ -101,6 +101,28 @@ export class OmOrchestrator {
   private enabled = false;
   private seeded = false;
   private pendingChunks = new Set<string>();
+  /**
+   * R4: dispatch cursor — the furthest coversUpToId handed to an observer.
+   * In-memory ONLY (never persisted): after a restart dispatching starts
+   * from the committed watermark (safe: committed slices are not
+   * re-observed). The committed watermark stays the source of truth for
+   * "observed" semantics — compaction render / unobservedTokens count from
+   * it, not from this cursor.
+   */
+  private dispatchedUpToId = '';
+  /**
+   * R4/M6: for each dispatched slice — the dispatch cursor BEFORE it was
+   * handed out. A slice whose COMMIT ultimately fails rolls the cursor back
+   * to its origin so the next pump re-observes it (M6 contract); a slice
+   * whose WORKER failed does not (anti cost-loop — it is skipped).
+   */
+  private readonly sliceOrigins = new Map<string, string>();
+  /**
+   * R5: per-second observation seq counters (replaced the O(n) full-ledger
+   * scan in maxSeqForSecond). Rebuilt once at construction (one read),
+   * updated on every committed observation (O(1)).
+   */
+  private readonly seqBySecond = new Map<string, number>();
   private consolidating = false;
   private extracting = false;
   private lastGapMarkedFor: Date | null = null;
@@ -136,6 +158,8 @@ export class OmOrchestrator {
       now: this.now,
       log: this.log,
       onStatus: () => this.emitStatus(),
+      onLedgerChange: () => this.invalidateStatusCache(),
+      onCommitFailure: (input) => this.onSliceCommitFailed(input),
     });
     // R9: gap-marker dedup must survive host restarts — restore the already
     // marked pause from the ledger (the marker stores the previous message
@@ -147,6 +171,25 @@ export class OmOrchestrator {
     } catch (e) {
       this.log(`gap-marker restore failed: ${String(e)}`);
     }
+    // R5: rebuild the per-second seq counters from the ledger (one read) so
+    // append-time id derivation is O(1). A restarted orchestrator continues
+    // the seq counter from the existing entries (no id collisions).
+    try {
+      for (const e of d.ledger.read<'om.observation'>('om.observation')) {
+        this.trackObsId(e.data.id);
+      }
+    } catch (e) {
+      this.log(`seq rebuild failed: ${String(e)}`);
+    }
+  }
+
+  /** R5: remember an observation id's seq in the per-second counter. */
+  private trackObsId(id: string): void {
+    const m = /^om-(\d{14})-(\d+)$/.exec(id);
+    if (!m) return;
+    const seq = Number(m[2]);
+    const prev = this.seqBySecond.get(m[1]!);
+    if (prev === undefined || seq > prev) this.seqBySecond.set(m[1]!, seq);
   }
 
   // ---- gate (FR-7.2) -----------------------------------------------------
@@ -168,6 +211,7 @@ export class OmOrchestrator {
       data: { enabled: on },
       at: this.now().toISOString(),
     });
+    this.invalidateStatusCache();
     this.emitStatus();
     this.log(`enabled → ${on}`);
   }
@@ -241,15 +285,18 @@ export class OmOrchestrator {
   private earlyPump(): void {
     this.lastPumpedTotalTokens = this.safeTotalTokens();
     if (this.observersInFlight() >= this.cfg.observerConcurrency) return;
-    const wm = this.watermark();
+    // R4: dispatch from the dispatch cursor (not the raw committed watermark)
+    // so an already-dispatched slice can never be handed out twice (with a
+    // different boundary) by two triggers.
+    const from = this.dispatchCursor();
     const chunk = this.d.history.nextChunk(
-      { coversUpToId: wm.coversUpToId },
+      { coversUpToId: from },
       { minTokens: this.cfg.earlyActivation.minUnobservedTokens },
     );
     if (!chunk) return;
     if (this.pendingChunks.has(chunk.coversUpToId)) return;
     this.log(`early chunk: ${chunk.tokens} tokens up to ${chunk.coversUpToId}`);
-    this.startObserver(chunk.coversUpToId, chunk.text, chunk.overlapContext, chunk.fromId);
+    this.dispatchSlice(chunk, from);
   }
 
   async onAgentEnd(opts?: { runUnfinished?: boolean }): Promise<void> {
@@ -280,19 +327,57 @@ export class OmOrchestrator {
 
   private pumpObservers(): void {
     this.lastPumpedTotalTokens = this.safeTotalTokens();
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
+    // R4: dispatch UP TO `observerConcurrency` slices per pump. The committed
+    // watermark only moves on commit, so the pump works off the in-memory
+    // dispatch cursor (dispatchCursor) — otherwise every iteration would
+    // re-derive the same slice and stop after one observer.
+    for (;;) {
       if (this.observersInFlight() >= this.cfg.observerConcurrency) return;
-      const wm = this.watermark();
-      const chunk = this.d.history.nextChunk({
-        coversUpToId: wm.coversUpToId,
-      });
+      const from = this.dispatchCursor();
+      const chunk = this.d.history.nextChunk({ coversUpToId: from });
       if (!chunk) return;
-      // one observer per slice: the watermark moves only after the commit,
-      // so the same slice would otherwise be launched up to `concurrency` times
+      // belt & braces: an identical slice must never be dispatched twice
+      // (e.g. early activation raced with this pump)
       if (this.pendingChunks.has(chunk.coversUpToId)) return;
-      this.startObserver(chunk.coversUpToId, chunk.text, chunk.overlapContext, chunk.fromId);
+      this.dispatchSlice(chunk, from);
     }
+  }
+
+  /**
+   * R4: dispatch cursor = max(committed watermark, dispatchedUpToId). Never
+   * behind the committed watermark (a late commit can only move that
+   * forward), so committed history is never re-observed.
+   */
+  private dispatchCursor(): string {
+    const wm = this.watermark().coversUpToId;
+    return this.dispatchedUpToId > wm ? this.dispatchedUpToId : wm;
+  }
+
+  /** R4: hand a slice to a new observer, advancing the dispatch cursor. */
+  private dispatchSlice(
+    chunk: { coversUpToId: string; text: string; overlapContext: string; fromId: string; tokens: number },
+    from: string,
+  ): void {
+    this.sliceOrigins.set(chunk.coversUpToId, from);
+    if (chunk.coversUpToId > this.dispatchedUpToId) this.dispatchedUpToId = chunk.coversUpToId;
+    this.startObserver(chunk.coversUpToId, chunk.text, chunk.overlapContext, chunk.fromId);
+  }
+
+  /**
+   * R4/M6: a slice whose COMMIT ultimately failed (the LLM result is
+   * preserved in om.lastError) must be re-observed on the next cycle — roll
+   * the dispatch cursor back to where this slice was dispatched from. The
+   * committed-watermark lower bound (dispatchCursor) prevents re-observing
+   * committed history when later slices already committed. A WORKER failure
+   * does NOT trigger this: the slice is skipped, not re-run (anti cost-loop).
+   */
+  private onSliceCommitFailed(input: WorkerInput): void {
+    const covers = input.chunk?.coversUpToId;
+    if (!covers) return;
+    const origin = this.sliceOrigins.get(covers);
+    if (origin === undefined) return;
+    this.sliceOrigins.delete(covers);
+    if (origin < this.dispatchedUpToId) this.dispatchedUpToId = origin;
   }
 
   private startObserver(coversUpToId: string, text: string, overlapContext: string, fromId?: string): void {
@@ -315,6 +400,9 @@ export class OmOrchestrator {
   private commitObservations(runId: string, coversUpToId: string, fromId: string | undefined, res: WorkerResult): void {
     // the slice committed → it is no longer "bad" (E1 shutdown pump may pass it)
     this.runs.clearBadSlice(coversUpToId);
+    // NOTE: sliceOrigins.delete(coversUpToId) happens ONLY after a fully
+    // successful commit (end of this method) — a failed commit must keep
+    // the origin for the R4/M6 dispatch-cursor rollback.
     if (!this.enabled) {
       this.log(`discarding observations of ${runId} (disabled mid-run)`);
       return;
@@ -340,6 +428,7 @@ export class OmOrchestrator {
       if (quarantined) this.log(`observation quarantined (injection-like, ${matched})`);
       const lastSeq = this.maxSeqForSecond();
       const id = nextObservationId({ lastSeq, now: () => this.now().getTime() });
+      this.trackObsId(id); // R5: keep the per-second counter current (O(1))
       this.d.ledger.append({
         type: 'om.observation',
         data: {
@@ -356,21 +445,17 @@ export class OmOrchestrator {
         meta: { runId },
       });
     }
+    this.sliceOrigins.delete(coversUpToId); // commit fully succeeded
+    this.invalidateStatusCache(); // R5: the pool just changed
     this.emitStatus();
   }
 
   private maxSeqForSecond(): number {
-    // seq scoped to the current second keeps ids lexicographically ordered.
-    const ts = this.secondStamp();
-    let max = 0;
-    for (const e of this.d.ledger.read<'om.observation'>('om.observation')) {
-      const id = e.data.id;
-      if (id.includes(`-${ts}-`) || id.startsWith(`om-${ts}-`)) {
-        const m = /-(\d+)$/.exec(id);
-        if (m?.[1] && Number(m[1]) > max) max = Number(m[1]);
-      }
-    }
-    return max;
+    // R5: O(1) — the per-second map is rebuilt at construction and updated
+    // on every append (replaces the previous full-ledger scan per
+    // observation). seq is scoped to the current second so ids stay
+    // lexicographically ordered.
+    return this.seqBySecond.get(this.secondStamp()) ?? 0;
   }
 
   private secondStamp(): string {
@@ -429,6 +514,9 @@ export class OmOrchestrator {
     this.runs.trackTask(input.runId, input.role, this.now().toISOString(),
       task.finally(() => {
         this[flag] = false;
+        // R5: consolidator/extractor/reflector write topic/extracted/journey
+        // files directly (outside our ledger) — re-read them on next status.
+        this.invalidateStatusCache();
         this.emitStatus();
       }),
     );
@@ -470,6 +558,7 @@ export class OmOrchestrator {
         journeyChanged: c.journeyChanged,
         maxCoversUpToId,
       });
+      this.invalidateStatusCache(); // R5: the pool just shrank
     }
     this.d.memory.renderIndex(this.sessionId);
     this.log(`consolidation ${runId}: tombstoned ${all.length} observations`);
@@ -549,6 +638,7 @@ export class OmOrchestrator {
       data: { id: gapMarkerId(this.now(), seq), at, prevAt: prevAt.toISOString(), humanDuration: gap.humanDuration, ms: gap.ms },
       at,
     });
+    this.invalidateStatusCache();
     this.d.sink.onGapMarker?.({ at, humanDuration: gap.humanDuration, ms: gap.ms });
     this.emitStatus();
   }
@@ -835,33 +925,84 @@ export class OmOrchestrator {
 
   // ---- status (FR-7.3) ------------------------------------------------------
 
-  status(): OmStatus {
-    const pool = this.pool();
+  /**
+   * R5: status() cache of the expensive reads (pool scan, topic/journey/
+   * extracted files, costs, lastError, watermark). In-memory only;
+   * invalidated by every ledger mutation of OUR process (RunManager
+   * onLedgerChange + the orchestrator's own append/tombstone sites) and by
+   * consolidator/extractor/reflector runs finishing (workers write topic
+   * files directly). NFR: never stale past one of our own appends.
+   */
+  private statusCache: {
+    activeObservations: number;
+    poolTokens: number;
+    watermark: string;
+    topicCount: number;
+    extractedCount: number;
+    journeyTokens: number;
+    costUsd: number;
+    runs: number;
+    lastError: OmStatus['lastError'];
+  } | null = null;
+
+  private invalidateStatusCache(): void {
+    this.statusCache = null;
+  }
+
+  /** R5: one ledger read per type; computes pool + watermark together. */
+  private buildStatusCache() {
+    const obs = this.d.ledger.read<'om.observation'>('om.observation');
+    const tomb = this.d.ledger.read<'om.tombstone'>('om.tombstone');
+    const pool = foldPool(obs, tomb);
+    // Watermark must survive tombstones (FR-1.3) — same rule as watermark().
+    let watermark = progressOf(obs.map((e) => e.data), []).coversUpToId;
+    for (const t of tomb) {
+      if (t.data.maxCoversUpToId && t.data.maxCoversUpToId > watermark) watermark = t.data.maxCoversUpToId;
+    }
     const costs = sumCosts(this.d.ledger.read<'om.cost'>('om.cost'));
     const lastErr = this.d.ledger.read<'om.lastError'>('om.lastError');
     const lastErrorEntry = lastErr[lastErr.length - 1];
     return {
-      enabled: this.enabled,
-      passive: this.cfg.passive,
-      inFlight: this.runs.inFlight.map((r) => ({ runId: r.runId, role: r.role, startedAt: r.startedAt })),
       activeObservations: pool.observations.length,
       poolTokens: pool.tokens,
-      nextObserverInTokens: this.nextObserverProgress(),
-      consolidationPending: this.consolidating,
+      watermark,
       topicCount: this.d.memory.listTopics(this.sessionId).length,
       extractedCount: this.d.memory.listExtracted(this.sessionId).length,
       journeyTokens: this.estimate(this.d.memory.readJourney(this.sessionId)),
-      contextTokens: this.safeContextTokens(),
       costUsd: costs.totalUsd,
       runs: costs.runs,
       lastError: lastErrorEntry ? { message: lastErrorEntry.data.message, at: lastErrorEntry.at } : null,
     };
   }
 
-  private nextObserverProgress(): number | null {
+  status(): OmStatus {
+    // R5: heavy reads are cached; rebuilt only after one of our own
+    // mutations invalidated the cache.
+    const c = this.statusCache ?? (this.statusCache = this.buildStatusCache());
+    return {
+      enabled: this.enabled,
+      passive: this.cfg.passive,
+      inFlight: this.runs.inFlight.map((r) => ({ runId: r.runId, role: r.role, startedAt: r.startedAt })),
+      activeObservations: c.activeObservations,
+      poolTokens: c.poolTokens,
+      nextObserverInTokens: this.nextObserverProgress(c.watermark),
+      consolidationPending: this.consolidating,
+      topicCount: c.topicCount,
+      extractedCount: c.extractedCount,
+      journeyTokens: c.journeyTokens,
+      contextTokens: this.safeContextTokens(),
+      costUsd: c.costUsd,
+      runs: c.runs,
+      lastError: c.lastError,
+    };
+  }
+
+  private nextObserverProgress(watermark: string): number | null {
     if (!this.enabled || this.cfg.passive) return null;
     try {
-      const unobserved = this.d.history.unobservedTokens(this.watermark().coversUpToId);
+      // unobservedTokens is an in-memory O(M) walk (no fs) — left uncached
+      // on purpose: the history has no cheap change signal on the interface.
+      const unobserved = this.d.history.unobservedTokens(watermark);
       return Math.max(0, this.cfg.chunkTokens - unobserved);
     } catch {
       return null;

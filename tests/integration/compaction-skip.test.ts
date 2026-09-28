@@ -28,6 +28,9 @@ import type {
 
 const cfg: OmConfig = resolveConfig({
   chunkTokens: 10,
+  // These tests freeze single-slice in-flight scenarios; pin the legacy
+  // serial dispatch (R4 parallelism is covered in wave6 tests).
+  observerConcurrency: 1,
   poolTargetTokens: 50000,
   consolidateAtPoolTokens: 100000, // keep auto-consolidation off
   compactAtContextTokens: 1000,

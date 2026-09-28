@@ -181,7 +181,7 @@ describe('R9: gap-marker dedup survives a host restart', () => {
 
 describe('A5: drainForCompaction waits for in-flight observers', () => {
   it('the drain blocks until the observer commits; the committed observation is then rendered', async () => {
-    const cfgA5 = resolveConfig({ ...baseConfig, tailTokens: 5 });
+    const cfgA5 = resolveConfig({ ...baseConfig, tailTokens: 5, observerConcurrency: 1 });
     const h = new MockHistory({ chunkTokens: cfgA5.chunkTokens });
     const ledger = new MockLedger();
     let release!: (res: WorkerResult) => void;
