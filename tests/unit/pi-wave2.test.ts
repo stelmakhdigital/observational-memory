@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import ext from '../../src/adapters/pi/index.js';
+import { estimateTokens } from '../../src/core/tokens.js';
 
 let cwd: string;
 
@@ -107,6 +108,82 @@ describe('A5: session_before_compact waits for in-flight observers', () => {
     const hook = env.handlers.get('session_before_compact')!;
     const res = await hook({ preparation: { firstKeptEntryId: 'e1', tokensBefore: 5 } }, env.ctx);
     expect(res).toBeUndefined();
+  });
+});
+
+describe('compaction tail clamp (stalled observer)', () => {
+  it('caps firstKeptEntryId so the retained tail fits the model window', async () => {
+    // 40 messages x 20_000 chars ≈ 5_000 tokens each = 200K tokens total.
+    const entries = Array.from({ length: 40 }, (_, i) => ({
+      type: 'message',
+      id: `e${i}`,
+      parentId: i > 0 ? `e${i - 1}` : null,
+      timestamp: new Date().toISOString(),
+      message: { role: i % 2 ? 'assistant' : 'user', content: 'x'.repeat(20_000) },
+    }));
+    const handlers = new Map<string, (e: unknown, ctx: unknown) => unknown>();
+    const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
+    const pi = {
+      on: (name: string, h: (e: unknown, ctx: unknown) => unknown) => handlers.set(name, h),
+      appendEntry: () => {},
+      sendMessage: () => {},
+      registerCommand: (name: string, opts: { handler: (args: string, ctx: unknown) => Promise<void> }) =>
+        commands.set(name, opts),
+      registerTool: () => {},
+    } as never;
+    const handle = ext(pi);
+    const ctx = {
+      ui: { notify: () => {}, setStatus: () => {} },
+      hasUI: false,
+      cwd,
+      sessionManager: {
+        getBranch: () => entries,
+        getEntries: () => entries,
+        getSessionId: () => 'sess-clamp',
+        getHeader: () => ({ id: 'sess-clamp', cwd, timestamp: new Date().toISOString() }),
+      },
+      isIdle: () => true,
+      // 128K window: cap = 128K − 96K headroom − block ≈ 31K tokens.
+      getContextUsage: () => ({ tokens: 200_000, contextWindow: 131_072, percent: 152 }),
+      compact: () => {},
+      model: { provider: 'test', id: 'test-model' },
+    } as never;
+
+    await handlers.get('session_start')!(undefined, ctx);
+    await commands.get('om')!.handler('on', ctx);
+
+    const rt = handle.runtime()!;
+    // Stalled observer: the plan's tail boundary sits at e2, so the unclamped
+    // retained tail is ~190K tokens — far above the window.
+    const block = {
+      observations: '',
+      memoryMap: '',
+      journey: '',
+      currentTask: '',
+      verbatimTail: '',
+      gapMarkers: '',
+      text: 'block',
+      generatedAt: new Date().toISOString(),
+    };
+    rt.orch.compactionPlan = () => ({ block, tailBoundaryId: 'e2' });
+
+    const hook = handlers.get('session_before_compact')!;
+    const res = (await hook(
+      { preparation: { firstKeptEntryId: 'fallback', tokensBefore: 200_000 } },
+      ctx,
+    )) as { compaction: { summary: string; firstKeptEntryId: string; tokensBefore: number } };
+
+    // Without the clamp the hook would keep everything after e2 → 'e3'.
+    expect(res.compaction.firstKeptEntryId).not.toBe('e3');
+    // Retained tail after firstKept fits the cap (+ at most one message, ~3_125
+    // tokens each — dense-run estimate of 20_000 'x').
+    const keptIdx = entries.findIndex((e) => e.id === res.compaction.firstKeptEntryId);
+    expect(keptIdx).toBeGreaterThan(20);
+    const keptTokens = entries
+      .slice(keptIdx)
+      .reduce((s, e) => s + estimateTokens(String((e.message as { content: string }).content)), 0);
+    expect(keptTokens).toBeLessThanOrEqual(34_700 + 3_125);
+    expect(res.compaction.summary).toBe('block');
   });
 });
 

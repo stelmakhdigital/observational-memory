@@ -29,6 +29,7 @@ import { registerRecallTool } from './recall-tool.js';
 import { runEndedUnfinished } from './resume.js';
 export { runEndedUnfinished };
 import { makeSink } from './sink.js';
+import { estimateTokens } from '../../core/tokens.js';
 import { createUi } from './ui.js';
 import type {
   PiApi,
@@ -41,6 +42,14 @@ export type { Runtime } from './boot.js';
 export interface OmExtension {
   runtime(): Runtime | null;
 }
+
+/**
+ * Headroom reserved OUTSIDE the retained tail: system prompt + tool
+ * definitions (~50K measured) + model output reserve (~16K). Kept as a
+ * constant — the exact system size is not visible from the hook.
+ * ponytail: fixed 96K, make it a config knob if small-window models suffer.
+ */
+const COMPACT_TAIL_HEADROOM = 96_384;
 
 export default function observationalMemory(pi: PiApi): OmExtension {
   let rt: Runtime | null = null;
@@ -92,10 +101,35 @@ export default function observationalMemory(pi: PiApi): OmExtension {
     // their observations from the summary.
     await r.orch.drainForCompaction();
     const { block, tailBoundaryId } = r.orch.compactionPlan();
+    let firstKept = firstEntryIdAfter(ctx, tailBoundaryId, prep.firstKeptEntryId);
+    // Safety net: when the observer is stalled, everything after
+    // tailBoundaryId is unobserved and kept verbatim — that tail can exceed
+    // the model window and the compact-and-retry retry then 400s. Clamp the
+    // retained tail to what fits. The dropped span has no committed chunk
+    // boundaries past tailBoundaryId (the snap would have reached them), so
+    // nothing memory-backed is lost.
+    const window = ctx.getContextUsage()?.contextWindow ?? 0;
+    const cap = window > 0 ? window - COMPACT_TAIL_HEADROOM - estimateTokens(block.text) : 0;
+    if (cap > 0) {
+      const capped = r.orch.history.tailStartIdFor?.(cap);
+      if (capped !== undefined && capped !== tailBoundaryId) {
+        const tailNow = (() => {
+          try {
+            return r.orch.history.unobservedTokens(tailBoundaryId);
+          } catch {
+            return Infinity; // unknown → clamp to be safe
+          }
+        })();
+        if (tailNow > cap) {
+          firstKept = firstEntryIdAfter(ctx, capped, prep.firstKeptEntryId);
+          debug(`compaction tail clamped: ${tailNow} > ${cap} tokens (observer stalled?)`);
+        }
+      }
+    }
     return {
       compaction: {
         summary: block.text,
-        firstKeptEntryId: firstEntryIdAfter(ctx, tailBoundaryId, prep.firstKeptEntryId),
+        firstKeptEntryId: firstKept,
         tokensBefore: prep.tokensBefore,
       },
     };

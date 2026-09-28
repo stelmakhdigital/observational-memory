@@ -785,6 +785,11 @@ export class OmOrchestrator {
     return this.compactionPlan().block;
   }
 
+  /** History seam (adapters clamp the compaction tail to the model window). */
+  get history(): HistorySource {
+    return this.d.history;
+  }
+
   /**
    * Compaction plan (FR-3): the rendered block + the tail boundary id (last
    * message NOT included in the verbatim tail; '' when the tail covers
@@ -835,9 +840,15 @@ export class OmOrchestrator {
    * that are in neither). '' when the tail covers the whole history.
    *
    * Conservative on purpose: the snap only moves the boundary EARLIER (to a
-   * committed chunk end with id < the raw boundary) and, among candidates, the
-   * one whose resulting tail is closest to tailTokens — the reference's rule.
-   * Never moving it forward keeps the tail a superset of the raw one.
+   * committed chunk end at or before the raw boundary) and, among candidates,
+   * the one whose resulting tail is closest to tailTokens — the reference's
+   * rule. Never moving it forward keeps the tail a superset of the raw one.
+   *
+   * "At or before" is compared via unobservedTokens monotonicity, NOT by id
+   * string: pi 0.87.x entry ids are `randomUUID().slice(0, 8)` — random hex,
+   * lexicographic order ≠ chronological (the uuidv7 contract assumed in
+   * history.ts is broken). String comparison would filter out random half of
+   * the candidates and could snap to a much older boundary.
    */
   tailBoundaryId(): string {
     const raw = this.d.history.tailStartIdFor?.(this.cfg.tailTokens) ?? this.watermark().coversUpToId;
@@ -848,16 +859,23 @@ export class OmOrchestrator {
     for (const e of this.d.ledger.read<'om.observation'>('om.observation')) {
       if (e.data.coversUpToId) boundaries.add(e.data.coversUpToId);
     }
+    let tailRaw = -1;
+    try {
+      tailRaw = this.d.history.unobservedTokens(raw);
+    } catch {
+      // raw unknown to history (branch rewrite): fall back to raw, no snap.
+      return raw;
+    }
     let best: string | null = null;
     let bestDelta = Number.POSITIVE_INFINITY;
     for (const b of boundaries) {
-      if (b > raw) continue; // conservative: never move the cutoff forward
       let tail: number;
       try {
         tail = this.d.history.unobservedTokens(b);
       } catch {
         continue;
       }
+      if (tail < tailRaw) continue; // conservative: never move the cutoff forward
       const delta = Math.abs(tail - this.cfg.tailTokens);
       if (delta < bestDelta) {
         bestDelta = delta;
