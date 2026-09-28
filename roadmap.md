@@ -140,3 +140,9 @@
 | 2026-09 | — | fix install (d58879c): typescript/@types/node → dependencies (build под --omit=dev), typebox убран из devDeps (peer-install), v0.5.1 + тег; README @v0.5.1 (fca276c) |
 | 2026-09 | — | Live smoke v0.5.1 (27.09, qwen3.8-27b-fp8): 13/13 — M2 (0 worker-сессий), runs-счётчик, модель хоста, resume, изоляция, 0 крашей; находки: auto-compact в print-режиме не сработал (isIdle? — TUI-проверка), slash-only сессии не персистятся в headless |
 | 2026-09 | — | Fix install: typescript+@types/node → dependencies, typebox убран из devDeps (peer авто-ставится npm), version 0.5.1 — prepare/build работает под npm install --omit=dev (pi git-install падал: tsc not found); live-проверено: tarball-install и git-clone+install --omit=dev; 289 тестов |
+| 2026-09 | a134e45 | v0.5.2: диагностический лог auto-compaction skip (not idle at agent_end) + smoke-отчёт в доках |
+| 2026-09 | 844d628 | v0.5.3: guard ui.setStatus (TUI boot-ctx без метода — декоративный статус не ломает пайплайн) + регресс-тест; 291 тест |
+| 2026-09 | c4141a5→43deb9a | v0.5.4: guard ВСЕХ ui-вызовов (notify+setStatus, hasUI=true с деградированным ui — live TUI) + stderr-диагностика «ui anomaly» + report()→console fallback; 292 теста |
+| 2026-09 | bef98dc | Волна 1 (refactoring-analysis): MCP — tail-read (A2), сверка session-id через OM_MCP_SESSION (A3), short-read цикл (A14) |
+| 2026-09 | cbe2c9d | Волна 1: pi-адаптер — сброс Runtime при замене сессии /new//resume (A1), drain-watchdog killTree+unref (A4) |
+| 2026-09 | 9649d17 | Волна 1: core — chunker overlap (R1), финальный pump наблюдений при graceful stop (E1), gap-markers по реальной паузе (R2); 313 тестов |
