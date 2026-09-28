@@ -53,6 +53,8 @@ export interface PiContextUsage {
 export interface PiContext {
   ui: PiUI;
   hasUI: boolean;
+  /** Current pi mode (e.g. 'tui' | 'rpc' | …) — used for UI diagnostics. */
+  mode?: string | undefined;
   cwd: string;
   sessionManager: PiSessionManager;
   isIdle(): boolean;
@@ -100,6 +102,9 @@ export interface PiApi {
   }>;
 }
 
-export interface PiModelRef extends ModelRef {
-  /** Free-form pattern fallback; see ModelRef.id. */
-}
+/**
+ * S8: was an empty interface extending ModelRef (no added members) — reduced
+ * to a plain alias. Kept as a named export for back-compat: config.ts
+ * (out of this refactor's scope) still references the name.
+ */
+export type PiModelRef = ModelRef;

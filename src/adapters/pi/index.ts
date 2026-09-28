@@ -5,6 +5,14 @@
  * (see README). Commands: /om [on|off], /om:status, /om:compact,
  * /om:consolidate. Default gate: OFF (FR-7.2).
  *
+ * S4: the factory below is wiring only; the pieces live in sibling modules:
+ *  - resume.ts     — auto-resume prompt / retryable-error regex / runEndedUnfinished
+ *  - ui.ts         — guarded UI helpers (notify/status/diag)
+ *  - boot.ts       — resolveWorkerModel + buildRuntime
+ *  - sink.ts       — the orchestrator EventSink
+ *  - commands.ts   — /om* command handlers
+ *  - recall-tool.ts— the om_recall tool
+ *
  * Wiring (spikes S1/S2):
  * - ledger: pi.appendEntry('om', …) — branch-local, survives resume, invisible
  *   to the LLM context;
@@ -13,85 +21,22 @@
  * - gap markers: injected as hidden custom messages (context-visible anchors);
  * - workers: headless `pi -p --mode json` subprocesses (PiSubprocessRunner).
  */
-import path from 'node:path';
-import { Type } from 'typebox';
-import {
-  MemoryStore,
-  OmOrchestrator,
-  type EventSink,
-  type OmStatus,
-  type RunInfo,
-  type WorkerResult,
-} from '../../core/index.js';
-import { loadPiAdapterConfig, type PiAdapterConfig } from './config.js';
-import type { ModelRef } from '../../core/config.js';
-import { firstBranchEntryIdAfter, PiHistorySource } from './history.js';
-import { PiLedgerStore, OM_CUSTOM_TYPE } from './ledger.js';
-import { PiSubprocessRunner } from './runner.js';
+import { buildRuntime, type Runtime } from './boot.js';
+import { registerCommands } from './commands.js';
+import { firstBranchEntryIdAfter } from './history.js';
+import { registerRecallTool } from './recall-tool.js';
+// Back-compat: exported from here since earlier versions.
+import { runEndedUnfinished } from './resume.js';
+export { runEndedUnfinished };
+import { makeSink } from './sink.js';
+import { createUi } from './ui.js';
 import type {
   PiApi,
-  PiCommandContext,
   PiCompactPreparation,
   PiContext,
 } from './types.js';
 
-/**
- * Auto-resume prompt (ported from pi-observational-memory, MIT): hidden
- * custom message that continues the agent after an auto-compaction left an
- * unfinished task. Terse on purpose — the freshly-rendered compaction block
- * already carries the recovered context.
- */
-const RESUME_PROMPT =
-  '[automatic] Your context was just compacted to free space; no user message was sent. ' +
-  'Continue exactly where you left off, as if the compaction had not happened.';
-
-/**
- * Pi's retryable-error detection (ported from pi-observational-memory, MIT):
- * pi auto-retries these itself, so OM must not add a resume turn on top.
- */
-const RETRYABLE_ERROR_RE =
-  /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i;
-
-interface LastAssistantLike {
-  stopReason?: string;
-  errorMessage?: string;
-}
-
-/**
- * Did the just-ended run leave the task UNFINISHED (so pi will not continue
- * it on its own)?
- *
- * Our auto-compaction fires at agent_end — the run is already settled — so
- * the mid-run equivalent of the reference's turnWillContinue (pending tool
- * results at compaction time) is the run's terminal stopReason:
- *  - 'length': output truncated mid-task → unfinished;
- *  - 'error' with a NON-retryable message: pi will not auto-retry →
- *    unfinished. Retryable errors are retried by pi itself (a resume message
- *    would double-continue); 'aborted' (user cancel) and clean stops are left
- *    to stop, exactly as if no compaction had happened.
- */
-export function runEndedUnfinished(messages: unknown): boolean {
-  if (!Array.isArray(messages)) return false;
-  let last: LastAssistantLike | null = null;
-  for (const m of messages) {
-    const msg = m as { role?: unknown } | null;
-    if (msg && typeof msg === 'object' && msg.role === 'assistant') last = m as LastAssistantLike;
-  }
-  if (!last || typeof last.stopReason !== 'string') return false;
-  if (last.stopReason === 'length') return true;
-  if (last.stopReason === 'error') {
-    // No errorMessage: pi's retry logic can't match a pattern → no auto-retry.
-    return typeof last.errorMessage === 'string' ? !RETRYABLE_ERROR_RE.test(last.errorMessage) : true;
-  }
-  return false;
-}
-
-interface Runtime {
-  config: PiAdapterConfig;
-  orch: OmOrchestrator;
-  memory: MemoryStore;
-  lastCtx: PiContext | null;
-}
+export type { Runtime } from './boot.js';
 
 export interface OmExtension {
   runtime(): Runtime | null;
@@ -103,193 +48,13 @@ export default function observationalMemory(pi: PiApi): OmExtension {
   const debug = (m: string) => {
     if (rt?.config.om.debugLog) console.error(`[om] ${m}`);
   };
-
-  /**
-   * n11: an empty worker model id means "inherit the host model" (the model
-   * the agent itself runs on). The runner takes static ModelRefs at boot, so
-   * the host model is resolved here (ctx.model at boot; mid-session model
-   * switches do not re-target already-built workers). Explicit ids pass
-   * through untouched; explicit provider/thinking are honored alongside an
-   * inherited id.
-   */
-  const resolveWorkerModel = (
-    ref: ModelRef | undefined,
-    role: string,
-    ctx: PiContext,
-    fallback?: ModelRef,
-  ): ModelRef => {
-    // extractor/reflect default to the consolidator model (runner semantics).
-    const r = ref ?? fallback;
-    if (r && r.id) return r;
-    if (ctx.model) {
-      return {
-        provider: r?.provider ?? ctx.model.provider,
-        id: ctx.model.id,
-        ...(r?.thinking ? { thinking: r.thinking } : {}),
-      };
-    }
-    // Host model unknown too: fail loudly (a clearly-named id makes the
-    // subprocess error obvious instead of a cryptic spawn failure).
-    const msg =
-      `worker "${role}" has no model configured (models.${role}.id) and the host model is unknown — ` +
-      `worker runs will fail; set "observational-memory".models.${role} in settings`;
-    console.error(`[om] ${msg}`);
-    notifyUi(ctx, `OM: ${msg}`, 'error');
-    return { ...(r ?? {}), id: 'om-unconfigured-model' };
-  };
-
-  // Decorative footer status; guarded because some pi modes/versions provide
-  // a ui object without setStatus (seen in TUI: boot-ctx ui predates the TUI
-  // ui object). A missing method must never break the pipeline.
-  // UI calls are guarded: in some pi modes/versions the ctx.ui object lacks
-  // methods even when hasUI is true (observed live in TUI: notify/setStatus
-  // missing). A decorative UI call must never break the pipeline; on the
-  // first anomaly we dump the actual ui shape to stderr for diagnosis.
-  let uiDiagLogged = false;
-  const diagUi = (ctx: PiContext, missing: string) => {
-    if (uiDiagLogged) return;
-    uiDiagLogged = true;
-    const ui = ctx.ui as unknown as Record<string, unknown> | undefined;
-    const mode = (ctx as { mode?: string }).mode;
-    console.error(
-      `[om] ui anomaly: missing ${missing}; mode=${mode ?? 'unknown'} ` +
-      `uiKeys=[${ui ? Object.keys(ui).join(',') : String(ui)}] hasUI=${ctx.hasUI}`,
-    );
-  };
-  const notifyUi = (ctx: PiContext, message: string, type: 'info' | 'warning' | 'error') => {
-    const fn = (ctx.ui as { notify?: unknown } | undefined)?.notify;
-    if (typeof fn === 'function') (fn as (m: string, t?: string) => void).call(ctx.ui, message, type);
-    else diagUi(ctx, 'notify');
-  };
-  const setUiStatus = (ctx: PiContext, text: string | undefined) => {
-    const fn = (ctx.ui as { setStatus?: unknown } | undefined)?.setStatus;
-    if (typeof fn === 'function') {
-      (fn as (key: string, text: string | undefined) => void).call(ctx.ui, 'om', text);
-    } else diagUi(ctx, 'setStatus');
-  };
-
-  const sink: EventSink = {
-    onStatus(s: OmStatus) {
-      const ctx = rt?.lastCtx;
-      if (!ctx) return;
-      if (!s.enabled) {
-        setUiStatus(ctx, undefined);
-        return;
-      }
-      setUiStatus(ctx, `OM ${s.activeObservations} obs · $${s.costUsd.toFixed(3)}`);
-    },
-    onCompactionBlock(_b, info) {
-      // The actual block is rendered inside session_before_compact (fresh
-      // history); here we just trigger pi's compaction flow.
-      const ctx = rt?.lastCtx;
-      if (ctx && ctx.isIdle()) {
-        const resume = !!info?.shouldResume;
-        ctx.compact({
-          onComplete: () => {
-            if (!resume) return;
-            // Re-check the gate: it may have flipped while compaction ran.
-            const r = rt;
-            if (!r || !r.orch.isEnabled() || r.config.om.passive) return;
-            try {
-              // Hidden message that triggers a new turn (resumeAfterMidRunCompaction,
-              // ported from pi-observational-memory, MIT).
-              pi.sendMessage(
-                { customType: 'om-resume', content: RESUME_PROMPT, display: false },
-                { triggerTurn: true },
-              );
-              debug('resume message sent after auto-compaction');
-            } catch (error) {
-              const msg = error instanceof Error ? error.message : String(error);
-              notifyUi(ctx, `OM: resume after compaction failed — ${msg}`, 'error');
-              debug(`resume failed: ${msg}`);
-            }
-          },
-        });
-      }
-    },
-    onRunStarted(r: RunInfo) {
-      debug(`run ${r.runId} (${r.role}) started`);
-    },
-    onRunFinished(r: RunInfo, w: WorkerResult) {
-      debug(`run ${r.runId} finished ok=${w.ok}${w.costUsd ? ` cost=$${w.costUsd}` : ''}`);
-    },
-    onError(e) {
-      rt?.lastCtx && notifyUi(rt.lastCtx, `OM: ${e.message}`, 'error');
-      debug(`error: ${e.message}`);
-    },
-    onGapMarker(g) {
-      pi.sendMessage(
-        {
-          customType: 'om',
-          content: `[temporal anchor] ${g.humanDuration} passed since the previous message (observational memory)`,
-          display: false,
-        },
-        { triggerTurn: false },
-      );
-      debug(`gap marker: ${g.humanDuration}`);
-    },
-  };
-
-  function boot(ctx: PiContext): Runtime {
-    if (rt) return rt;
-    const config = loadPiAdapterConfig(ctx.cwd);
-    const header = ctx.sessionManager.getHeader();
-    const sessionId = ctx.sessionManager.getSessionId() || header.id;
-    const memory = new MemoryStore(config.memoryDir, {
-      sharedDir: config.om.shared.enabled ? path.join(config.memoryDir, 'shared') : null,
-    });
-
-    const history = new PiHistorySource(
-      () => ctx.sessionManager,
-      () => ctx,
-      {
-        chunkTokens: config.om.chunkTokens,
-        chunkOverlapTokens: config.om.chunkOverlapTokens,
-        attachments: config.attachments,
-      },
-    );
-    const ledger = new PiLedgerStore(
-      (data) => pi.appendEntry(OM_CUSTOM_TYPE, data),
-      // C1: current branch only — om.* custom entries are branch-local
-      // (children of the leaf), so the branch contains exactly the ledger
-      // of the current /tree branch.
-      () => ctx.sessionManager.getBranch(),
-    );
-    const consolidatorModel = resolveWorkerModel(config.om.models.consolidator, 'consolidator', ctx);
-    const runner = new PiSubprocessRunner({
-      piBinary: config.piBinary,
-      cwd: ctx.cwd,
-      observerModel: resolveWorkerModel(config.om.models.observer, 'observer', ctx),
-      consolidatorModel,
-      extractorModel: resolveWorkerModel(config.om.models.extractor, 'extractor', ctx, consolidatorModel),
-      reflectModel: resolveWorkerModel(config.om.models.reflect, 'reflect', ctx, consolidatorModel),
-      sessionLabel: path.basename(ctx.cwd),
-      journeyTargetTokens: config.om.journeyTargetTokens,
-      priorityEnabled: config.om.priority.enabled,
-      timeoutMs: config.workerTimeoutMs,
-      debug,
-    });
-    const orch = new OmOrchestrator({
-      config: config.om,
-      sessionId,
-      forkParentSessionId: header.parentSession,
-      history,
-      ledger,
-      runner,
-      memory,
-      sink,
-      log: debug,
-    });
-    orch.restoreEnabled();
-    rt = { config, orch, memory, lastCtx: ctx };
-    debug(`booted (enabled=${orch.isEnabled()}, sessionId=${sessionId})`);
-    return rt;
-  }
+  const ui = createUi();
+  const sink = makeSink({ pi, getRt: () => rt, debug, ui });
 
   const track = (ctx: PiContext): Runtime => {
-    const r = boot(ctx);
-    r.lastCtx = ctx;
-    return r;
+    rt ??= buildRuntime({ pi, ctx, debug, ui, sink });
+    rt.lastCtx = ctx;
+    return rt;
   };
 
   // Id of the first entry AFTER the tail boundary (firstKeptEntryId).
@@ -339,7 +104,7 @@ export default function observationalMemory(pi: PiApi): OmExtension {
     const r = rt;
     if (!r) return;
     await r.orch.shutdown();
-    r.lastCtx && setUiStatus(r.lastCtx, undefined);
+    r.lastCtx && ui.setUiStatus(r.lastCtx, undefined);
     // A1: pi 0.87.1 sends session_shutdown (reason 'new' | 'resume' | 'fork')
     // when /new or /resume switches sessions WITHIN the same process. Drop
     // the old Runtime so the next session_start/track() boots a fresh
@@ -350,195 +115,8 @@ export default function observationalMemory(pi: PiApi): OmExtension {
     r.lastCtx = null;
   });
 
-  // ---- commands (FR-7.1) ------------------------------------------------
-
-  const report = (ctx: PiCommandContext, lines: string[]) => {
-    const out = lines.join('\n');
-    if (ctx.hasUI) for (const l of lines) notifyUi(ctx, l, 'info');
-    else console.log(out);
-  };
-
-  // v0.5: the agent itself can query memory mid-conversation (deterministic,
-  // no LLM). Registered at boot; the gate is checked at call time.
-  pi.registerTool({
-    name: 'om_recall',
-    label: 'OM Recall',
-    description:
-      'Search this session’s observational memory (observations, durable topics, journey, extracted values). '
-      + 'Use when you need a fact, decision or earlier detail that is no longer in the visible context. '
-      + 'Deterministic BM25-lite search — no LLM. Optional since/until (ISO dates) filter observations by time.',
-    promptSnippet: 'Search the session’s observational memory (facts, decisions, history)',
-    promptGuidelines: [
-      'Use om_recall before re-asking the user for context that may already be in memory.',
-    ],
-    parameters: Type.Object({
-      query: Type.String({ description: 'What to look for' }),
-      limit: Type.Optional(Type.Number({ description: 'Max hits (default 10)' })),
-      since: Type.Optional(Type.String({ description: 'Only observations created on/after (ISO date)' })),
-      until: Type.Optional(Type.String({ description: 'Only observations created on/before (ISO date)' })),
-    }),
-    async execute(_toolCallId: string, params: { query: string; limit?: number; since?: string; until?: string }, _signal: unknown, _onUpdate: unknown, ctx: PiContext) {
-      const r = track(ctx);
-      if (!r.orch.isEnabled()) {
-        return { content: [{ type: 'text', text: 'Observational memory is off (enable with /om on).' }], details: {} };
-      }
-      let text: string;
-      try {
-        text = r.orch.recallText(params.query, {
-          limit: params.limit,
-          since: params.since,
-          until: params.until,
-        });
-      } catch (e) {
-        // R7: invalid since/until throws OmError — surface as tool text.
-        return { content: [{ type: 'text', text: `om_recall error: ${e instanceof Error ? e.message : String(e)}` }], details: {} };
-      }
-      return { content: [{ type: 'text', text }], details: {} };
-    },
-  });
-
-  pi.registerCommand('om', {
-    description: 'Toggle observational memory for this session (on/off)',
-    handler: async (args, ctx) => {
-      const r = track(ctx);
-      const t = args.trim().toLowerCase();
-      if (t === 'on') r.orch.setEnabled(true);
-      else if (t === 'off') r.orch.setEnabled(false);
-      else r.orch.setEnabled(!r.orch.isEnabled());
-      report(ctx, [r.orch.isEnabled() ? 'Observational memory: ON' : 'Observational memory: OFF']);
-    },
-  });
-
-  pi.registerCommand('om:status', {
-    description: 'Observational memory status',
-    handler: async (_args, ctx) => {
-      const r = track(ctx);
-      const s = r.orch.status();
-      report(ctx, [
-        `OM ${s.enabled ? 'on' : 'off'}${s.passive ? ' (passive)' : ''}`,
-        `pool: ${s.activeObservations} observations (~${s.poolTokens} tokens)`,
-        `consolidator: ${s.consolidationPending ? 'running' : 'idle'}`,
-        `memory: ${s.topicCount} topics, journey ~${s.journeyTokens} tokens`,
-        s.extractedCount !== undefined ? `extracted: ${s.extractedCount} values` : '',
-        `context: ${s.contextTokens ?? '?'} tokens`,
-        `session cost: $${s.costUsd.toFixed(3)} (${s.runs} runs)`,
-        `in flight: ${s.inFlight.map((i) => i.role).join(', ') || 'none'}`,
-        s.lastError ? `last error: ${s.lastError.message}` : '',
-      ].filter(Boolean));
-    },
-  });
-
-  pi.registerCommand('om:compact', {
-    description: 'Force an observational-memory compaction now',
-    handler: async (_args, ctx) => {
-      const r = track(ctx);
-      if (!r.orch.isEnabled()) {
-        report(ctx, ['OM is off — enable with /om on first.']);
-        return;
-      }
-      report(ctx, ['Compacting with observational memory…']);
-      await r.orch.forceCompact();
-    },
-  });
-
-  pi.registerCommand('om:consolidate', {
-    description: 'Force a consolidation now (ignore pool threshold)',
-    handler: async (_args, ctx) => {
-      const r = track(ctx);
-      if (!r.orch.isEnabled()) {
-        report(ctx, ['OM is off — enable with /om on first.']);
-        return;
-      }
-      r.orch.forceConsolidate();
-      report(ctx, ['Consolidation started (background). Check /om:status.']);
-    },
-  });
-
-  pi.registerCommand('om:extract', {
-    description: 'Force a structured-extractor refresh now (profile, current task, …)',
-    handler: async (_args, ctx) => {
-      const r = track(ctx);
-      if (!r.orch.isEnabled()) {
-        report(ctx, ['OM is off — enable with /om on first.']);
-        return;
-      }
-      r.orch.forceExtract();
-      report(ctx, ['Extraction started (background). Check /om:status.']);
-    },
-  });
-
-  pi.registerCommand('om:recall', {
-    description: 'Search this session’s observational memory: /om:recall <query> [limit N] [since DATE] [until DATE]',
-    handler: async (args, ctx) => {
-      const r = track(ctx);
-      if (!r.orch.isEnabled()) {
-        report(ctx, ['OM is off — enable with /om on first.']);
-        return;
-      }
-      const tokens = args.trim().split(/\s+/).filter(Boolean);
-      let limit: number | undefined;
-      let since: string | undefined;
-      let until: string | undefined;
-      const rest: string[] = [];
-      for (let i = 0; i < tokens.length; i++) {
-        const t = tokens[i]!;
-        if (t.toLowerCase() === 'limit') {
-          const raw = tokens[++i];
-          limit = Number(raw);
-          // A12: "limit" без значения (или нечисло) не должно давать NaN.
-          if (raw === undefined || raw === '' || !Number.isFinite(limit)) {
-            report(ctx, ['Usage: /om:recall <query> [limit N] [since DATE] [until DATE] (limit: positive integer)']);
-            return;
-          }
-        }
-        else if (t.toLowerCase() === 'since') since = tokens[++i];
-        else if (t.toLowerCase() === 'until') until = tokens[++i];
-        else rest.push(t);
-      }
-      // R7: an invalid date now throws from recall (OmError) — surface it as
-      // a usage message instead of crashing the command handler.
-      if (
-        (since !== undefined && since !== '' && Number.isNaN(Date.parse(since))) ||
-        (until !== undefined && until !== '' && Number.isNaN(Date.parse(until)))
-      ) {
-        report(ctx, ['Usage: /om:recall <query> [limit N] [since DATE] [until DATE] (dates: ISO, e.g. 2025-09-21)']);
-        return;
-      }
-      const query = rest.join(' ');
-      if (!query) {
-        report(ctx, ['Usage: /om:recall <query> [limit N] [since DATE] [until DATE]']);
-        return;
-      }
-      report(ctx, [r.orch.recallText(query, { limit, since, until })]);
-    },
-  });
-
-  pi.registerCommand('om:reflect', {
-    description: 'Force a sleep-time memory reorganization pass now (topics/INDEX/JOURNEY)',
-    handler: async (_args, ctx) => {
-      const r = track(ctx);
-      if (!r.orch.isEnabled()) {
-        report(ctx, ['OM is off — enable with /om on first.']);
-        return;
-      }
-      r.orch.forceReflect();
-      report(ctx, ['Reflect pass started (background). Check /om:status.']);
-    },
-  });
-
-  pi.registerCommand('om:seed-from', {
-    description: 'Seed this session’s memory from another session: /om:seed-from <sessionId>',
-    handler: async (args, ctx) => {
-      const r = track(ctx);
-      const parent = args.trim();
-      if (!parent) {
-        report(ctx, ['Usage: /om:seed-from <sessionId>']);
-        return;
-      }
-      const did = r.memory.seedFrom(parent, ctx.sessionManager.getSessionId(), { force: true });
-      report(ctx, [did ? `Memory seeded from ${parent}.` : `No memory found for ${parent} (or nothing to copy).`]);
-    },
-  });
+  registerRecallTool(pi, track);
+  registerCommands(pi, { track, ui });
 
   return {
     runtime: () => rt,

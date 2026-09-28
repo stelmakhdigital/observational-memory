@@ -26,6 +26,7 @@ import type {
   WorkerResult,
 } from '../../core/types.js';
 import type { ModelRef } from '../../core/config.js';
+import { OM_WORKER_DIR_ENV, OM_WORKER_ENV } from './worker-env.js';
 import type { PiUsage } from './types.js';
 
 export interface PiSubprocessRunnerOptions {
@@ -62,6 +63,61 @@ function modelFlag(ref: ModelRef): string {
   const base = ref.provider ? `${ref.provider}/${ref.id}` : ref.id;
   return ref.thinking && ref.thinking !== 'off' ? `${base}:${ref.thinking}` : base;
 }
+
+// S2: everything role-specific in one table — prompt rendering, output
+// parsing and result shaping were previously duplicated across run() and
+// close(). The parse results are plain interfaces with `ok: boolean` (not a
+// discriminated union), so each entry is inferred with its concrete parsed
+// type and widened via asAny (sound: ROLES[role].parse is always the matching
+// parser, so toResult only ever sees its own P).
+type AnyParsed =
+  | ReturnType<typeof parseObserverOutput>
+  | ReturnType<typeof parseExtractorOutput>
+  | ReturnType<typeof parseReflectionReport>
+  | ReturnType<typeof parseConsolidationReport>;
+
+interface RoleEntry<P extends { ok: boolean }> {
+  render(input: WorkerInput, o: PiSubprocessRunnerOptions): string;
+  parse(body: string): P;
+  toResult(runId: string, p: P, costUsd: number | undefined): WorkerResult;
+  model(o: PiSubprocessRunnerOptions): ModelRef;
+  dir(input: WorkerInput, o: PiSubprocessRunnerOptions): string;
+}
+const asAny = <P extends { ok: boolean }>(e: RoleEntry<P>): RoleEntry<AnyParsed> => e as unknown as RoleEntry<AnyParsed>;
+
+const sessionRef = (o: PiSubprocessRunnerOptions): string =>
+  (o.sessionLabel ?? '').slice(-32) || 'session';
+
+const ROLES: Record<Role, RoleEntry<AnyParsed>> = {
+  observer: asAny({
+    render: (input, o) => renderObserverPrompt(input, { sessionLabel: o.sessionLabel, priorityEnabled: o.priorityEnabled ?? true }),
+    parse: parseObserverOutput,
+    toResult: (runId, p, costUsd) => ({ runId, ok: true, observations: p.observations, costUsd }),
+    model: (o) => o.observerModel,
+    dir: (_input, o) => o.cwd,
+  }),
+  consolidator: asAny({
+    render: (input, o) => renderConsolidatorPrompt(input, { session: sessionRef(o), journeyTargetTokens: o.journeyTargetTokens ?? 1000 }),
+    parse: parseConsolidationReport,
+    toResult: (runId, p, costUsd) => ({ runId, ok: true, costUsd, consolidation: { topics: p.topics, tombstoneIds: p.consumedIds, droppedIds: p.droppedIds, journeyChanged: p.journeyChanged } }),
+    model: (o) => o.consolidatorModel,
+    dir: (input, o) => input.pool?.sessionDir ?? o.cwd,
+  }),
+  extractor: asAny({
+    render: (input, o) => renderExtractorPrompt(input, { sessionLabel: o.sessionLabel }),
+    parse: parseExtractorOutput,
+    toResult: (runId, p, costUsd) => ({ runId, ok: true, extraction: p.values, costUsd }),
+    model: (o) => o.extractorModel ?? o.consolidatorModel,
+    dir: (_input, o) => o.cwd,
+  }),
+  reflect: asAny({
+    render: (input, o) => renderReflectPrompt(input, { session: sessionRef(o), journeyTargetTokens: o.journeyTargetTokens ?? 1000 }),
+    parse: parseReflectionReport,
+    toResult: (runId, p, costUsd) => ({ runId, ok: true, costUsd, reflection: { topics: p.topics, journeyChanged: p.journeyChanged } }),
+    model: (o) => o.reflectModel ?? o.consolidatorModel,
+    dir: (input, o) => input.reflect?.sessionDir ?? o.cwd,
+  }),
+};
 
 interface JsonlOutcome {
   /** n10: ALL non-empty assistant texts from message_end events, in order. */
@@ -103,14 +159,10 @@ export function parsePiJsonl(stdout: string): JsonlOutcome {
  * when nothing parses (caller falls back to the last non-empty text).
  */
 export function pickReportBody(texts: string[], role: Role): string {
+  const parse = ROLES[role].parse;
   for (let i = texts.length - 1; i >= 0; i--) {
     const t = texts[i]!;
-    const parsed =
-      role === 'observer' ? parseObserverOutput(t)
-      : role === 'extractor' ? parseExtractorOutput(t)
-      : role === 'reflect' ? parseReflectionReport(t)
-      : parseConsolidationReport(t);
-    if (parsed.ok) return t;
+    if (parse(t).ok) return t;
   }
   return '';
 }
@@ -141,28 +193,11 @@ export class PiSubprocessRunner implements ModelRunner {
 
   async run(role: Role, input: WorkerInput): Promise<WorkerResult> {
     const debug = this.o.debug ?? (() => {});
-    const prompt =
-      role === 'observer'
-        ? renderObserverPrompt(input, {
-            sessionLabel: this.o.sessionLabel,
-            priorityEnabled: this.o.priorityEnabled ?? true,
-          })
-        : role === 'extractor'
-          ? renderExtractorPrompt(input, { sessionLabel: this.o.sessionLabel })
-          : role === 'reflect'
-            ? renderReflectPrompt(input, {
-                session: (this.o.sessionLabel ?? '').slice(-32) || 'session',
-                journeyTargetTokens: this.o.journeyTargetTokens ?? 1000,
-              })
-            : renderConsolidatorPrompt(input, {
-                session: (this.o.sessionLabel ?? '').slice(-32) || 'session',
-                journeyTargetTokens: this.o.journeyTargetTokens ?? 1000,
-              });
-    const model =
-      role === 'observer' ? this.o.observerModel : role === 'reflect' ? (this.o.reflectModel ?? this.o.consolidatorModel) : (this.o.extractorModel ?? this.o.consolidatorModel);
-    const workerDir = role === 'consolidator' ? (input.pool?.sessionDir ?? this.o.cwd)
-      : role === 'reflect' ? (input.reflect?.sessionDir ?? this.o.cwd)
-      : this.o.cwd;
+    // S2: prompt / model / workdir all come from the role table.
+    const spec = ROLES[role];
+    const prompt = spec.render(input, this.o);
+    const model = spec.model(this.o);
+    const workerDir = spec.dir(input, this.o);
     const args = [
       '-p',
       '--mode', 'json',
@@ -177,8 +212,8 @@ export class PiSubprocessRunner implements ModelRunner {
     ];
     const env = {
       ...process.env,
-      OM_WORKER: role,
-      OM_WORKER_DIR: workerDir,
+      [OM_WORKER_ENV]: role,
+      [OM_WORKER_DIR_ENV]: workerDir,
     };
 
     return new Promise<WorkerResult>((resolve) => {
@@ -259,54 +294,15 @@ export class PiSubprocessRunner implements ModelRunner {
           });
           return;
         }
-        if (role === 'observer') {
-          const p = parseObserverOutput(body);
-          if (!p.ok) {
-            finish({ runId: input.runId, ok: false, costUsd: costUsd > 0 ? costUsd : undefined, error: p.error });
-            return;
-          }
-          finish({ runId: input.runId, ok: true, observations: p.observations, costUsd: costUsd > 0 ? costUsd : undefined });
-          return;
-        }
-        if (role === 'extractor') {
-          const x = parseExtractorOutput(body);
-          if (!x.ok) {
-            finish({ runId: input.runId, ok: false, costUsd: costUsd > 0 ? costUsd : undefined, error: x.error });
-            return;
-          }
-          finish({ runId: input.runId, ok: true, extraction: x.values, costUsd: costUsd > 0 ? costUsd : undefined });
-          return;
-        }
-        if (role === 'reflect') {
-          const rf = parseReflectionReport(body);
-          if (!rf.ok) {
-            finish({ runId: input.runId, ok: false, costUsd: costUsd > 0 ? costUsd : undefined, error: rf.error });
-            return;
-          }
-          finish({
-            runId: input.runId,
-            ok: true,
-            costUsd: costUsd > 0 ? costUsd : undefined,
-            reflection: { topics: rf.topics, journeyChanged: rf.journeyChanged },
-          });
-          return;
-        }
-        const r = parseConsolidationReport(body);
-        if (!r.ok) {
-          finish({ runId: input.runId, ok: false, costUsd: costUsd > 0 ? costUsd : undefined, error: r.error });
-          return;
-        }
-        finish({
-          runId: input.runId,
-          ok: true,
-          costUsd: costUsd > 0 ? costUsd : undefined,
-          consolidation: {
-            topics: r.topics,
-            tombstoneIds: r.consumedIds,
-            droppedIds: r.droppedIds,
-            journeyChanged: r.journeyChanged,
-          },
-        });
+        // S2: one parse/finish path for every role, via the role table.
+        const spec = ROLES[role];
+        const cost = costUsd > 0 ? costUsd : undefined;
+        const p = spec.parse(body);
+        finish(
+          p.ok
+            ? spec.toResult(input.runId, p, cost)
+            : { runId: input.runId, ok: false, costUsd: cost, error: p.error },
+        );
       });
     });
   }

@@ -14,12 +14,13 @@
  * This file must stay import-light (pi loads it with jiti inside the worker).
  */
 import { createScopedFileTools, type ScopedTool } from './scoped-tools.js';
+import { OM_WORKER_DIR_ENV, OM_WORKER_ENV } from './worker-env.js';
 import type { PiApi } from './types.js';
 
 export default function omWorker(pi: PiApi): void {
-  const role = process.env.OM_WORKER;
+  const role = process.env[OM_WORKER_ENV];
   if (role !== 'consolidator' && role !== 'reflect') return; // observer (or unset): no tools
-  const dir = process.env.OM_WORKER_DIR ?? process.cwd();
+  const dir = process.env[OM_WORKER_DIR_ENV] ?? process.cwd();
   for (const tool of createScopedFileTools(dir)) {
     pi.registerTool(tool as never);
   }

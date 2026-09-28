@@ -48,6 +48,65 @@ export function readCapped(p: string): { text: string; truncated: boolean } {
   return { text: buf.subarray(0, MAX_READ_BYTES).toString('utf8'), truncated: true };
 }
 const MAX_GREP_MATCHES = 100;
+
+/**
+ * S5: shared bounded directory walk (was duplicated in ls and grep).
+ * Depth cap + real-root containment live here; the caps on the number of
+ * files/bytes scanned are caller-specific (grep only) and are expressed via
+ * stopRecurse (checked before descending into a subdirectory) and stopInLoop
+ * (checked before each entry of a directory). onFile receives the file size
+ * for free (ls needs it; grep ignores it).
+ */
+export interface WalkOpts {
+  maxDepth: number;
+  withinRealRoot: (p: string) => boolean;
+  onFile: (full: string, name: string, size: number) => void;
+  onDir?: (full: string, name: string) => void;
+  /** Checked before each entry inside a directory (grep: matches cap). */
+  stopInLoop?: () => boolean;
+  /** Checked before descending into a subdirectory (grep: files/bytes caps). */
+  stopRecurse?: () => boolean;
+}
+
+export function walkDir(base: string, opts: WalkOpts): void {
+  const walk = (d: string, depth: number) => {
+    if (depth > opts.maxDepth) return;
+    for (const e of readdirSync(d)) {
+      if (opts.stopInLoop?.()) return;
+      const full = path.join(d, e);
+      const st = statSync(full);
+      if (st.isDirectory()) {
+        if (!opts.withinRealRoot(full)) continue; // n4: symlinked dir outside
+        opts.onDir?.(full, e);
+        if (opts.stopRecurse?.()) return;
+        walk(full, depth + 1);
+      } else {
+        if (!opts.withinRealRoot(full)) continue; // n4: symlinked file outside
+        opts.onFile(full, e, st.size);
+      }
+    }
+  };
+  walk(base, 0);
+}
+
+/**
+ * S5: the grep line-matching loop, shared between the walked files and the
+ * direct-file branch. `push` returns false to stop (matches cap reached).
+ */
+export function grepFile(
+  rel: string,
+  content: string,
+  re: RegExp,
+  push: (match: string) => boolean,
+): void {
+  const lines = content.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    re.lastIndex = 0;
+    if (re.test(lines[i]!)) {
+      if (!push(`${rel}:${i + 1}: ${lines[i]!.slice(0, 300)}`)) return;
+    }
+  }
+}
 // n5: hard caps bounding the grep work (catastrophic-backtracking defense is
 // INCOMPLETE without a worker-thread timeout — see audit n5, P2 residual risk).
 const MAX_GREP_FILES = 500;
@@ -198,22 +257,12 @@ Fails unless oldText occurs exactly once.`,
       try {
         const base = resolveContained(root, (typeof params.path === 'string' && params.path) || '.');
         const lines: string[] = [];
-        const walk = (d: string, depth: number) => {
-          if (depth > 4) return;
-          for (const e of readdirSync(d)) {
-            const full = path.join(d, e);
-            const st = statSync(full);
-            if (st.isDirectory()) {
-              if (!withinRealRoot(full)) continue; // n4: symlinked dir outside
-              lines.push(`${e}/`);
-              walk(full, depth + 1);
-            } else {
-              if (!withinRealRoot(full)) continue; // n4: symlinked file outside
-              lines.push(`${path.relative(root, full)}  (${st.size}b)`);
-            }
-          }
-        };
-        walk(base, 0);
+        walkDir(base, {
+          maxDepth: 4,
+          withinRealRoot,
+          onDir: (_full, e) => lines.push(`${e}/`),
+          onFile: (full, _e, size) => lines.push(`${path.relative(root, full)}  (${size}b)`),
+        });
         return ok(lines.length ? lines.join('\n') : '(empty)');
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
@@ -235,45 +284,35 @@ Fails unless oldText occurs exactly once.`,
         const matches: string[] = [];
         let files = 0;
         let bytes = 0; // n5: total bytes scanned across files
-        const walk = (d: string, depth: number) => {
-          if (depth > 4 || files > MAX_GREP_FILES || bytes > MAX_GREP_BYTES) return;
-          for (const e of readdirSync(d)) {
-            if (matches.length >= MAX_GREP_MATCHES) return;
-            const full = path.join(d, e);
-            const st = statSync(full);
-            if (st.isDirectory()) {
-              if (!withinRealRoot(full)) continue; // n4: symlinked dir outside
-              walk(full, depth + 1);
-            } else if (withinRealRoot(full) && /\.(md|ts|js|json|txt|log)$/i.test(e)) {
+        const pushMatch = (m: string): boolean => {
+          if (matches.length >= MAX_GREP_MATCHES) return false;
+          matches.push(m);
+          return true;
+        };
+        if (existsSync(base) && statSync(base).isFile()) {
+          // A15: byte-capped read (was uncapped readFileSync).
+          const { text } = readCapped(base);
+          grepFile(path.relative(root, base), text, re, pushMatch);
+        } else {
+          walkDir(base, {
+            maxDepth: 4,
+            withinRealRoot,
+            stopInLoop: () => matches.length >= MAX_GREP_MATCHES,
+            stopRecurse: () => files > MAX_GREP_FILES || bytes > MAX_GREP_BYTES,
+            onFile: (full, name) => {
+              if (!/\.(md|ts|js|json|txt|log)$/i.test(name)) return;
               files++;
               let content: string;
               try {
                 content = readFileSync(full, 'utf8');
               } catch {
-                continue;
+                return;
               }
-              if (Buffer.byteLength(content) > MAX_READ_BYTES) continue;
+              if (Buffer.byteLength(content) > MAX_READ_BYTES) return;
               bytes += Buffer.byteLength(content); // n5
-              const lines = content.split(/\r?\n/);
-              for (let i = 0; i < lines.length && matches.length < MAX_GREP_MATCHES; i++) {
-                re.lastIndex = 0;
-                if (re.test(lines[i]!)) {
-                  matches.push(`${path.relative(root, full)}:${i + 1}: ${lines[i]!.slice(0, 300)}`);
-                }
-              }
-            }
-          }
-        };
-        if (existsSync(base) && statSync(base).isFile()) {
-          // A15: byte-capped read (was uncapped readFileSync).
-          const { text } = readCapped(base);
-          const lines = text.split(/\r?\n/);
-          for (let i = 0; i < lines.length && matches.length < MAX_GREP_MATCHES; i++) {
-            re.lastIndex = 0;
-            if (re.test(lines[i]!)) matches.push(`${path.relative(root, base)}:${i + 1}: ${lines[i]!.slice(0, 300)}`);
-          }
-        } else {
-          walk(base, 0);
+              grepFile(path.relative(root, full), content, re, pushMatch);
+            },
+          });
         }
         return ok(matches.length ? matches.join('\n') : '(no matches)');
       } catch (e) {
