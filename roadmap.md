@@ -161,3 +161,5 @@
 | 2026-09 | 4fc03a4 | Волна 6 (mcp): ленивый init + кэш состояния (A7), инвалидация по env/mtime/size/session; 5 тестов |
 | 2026-09 | 8066601 | Волна 6 (core): реальный observer-параллелизм (R4: dispatched watermark + in-flight cap, skip/rollback при failure) + status()-кэш, O(1) maxSeq (R5); 367 тестов |
 | 2026-09 | 051fff2 | **v0.7.0** (тег): волна 6 — R4 (фича), R5, A7, мелочи |
+| 2026-09 | aa4be52 | fix(pi): positional message ids — pi 0.87.x entry ids are randomUUID().slice(0,8) |
+| 2026-09 | — | Live-аудит v0.7.0 (smoke+MCP+eval) + 3 фикса: /om unknown-arg не toggle'ит gate; tool-call args в messageText (кап 2000); auto-compact retry по agent_settled (print-режим, live-верифицирован); 373 теста |

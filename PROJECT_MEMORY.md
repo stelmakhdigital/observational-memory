@@ -120,38 +120,48 @@ ExtensionContext:
 Worker'ы в pi: headless-запуск `pi` через `pi.exec` / child_process
 (в референсе — subprocess pi с `-e agent/index.ts`, `OM_WORKER=observer|consolidator`).
 
-## 5. Целевая архитектура (черновик, уточнить в фазе Design)
+## 5. Архитектура (актуальная, v0.7.0)
 
 ```
-observational-memory/
-├── core/          # agent-agnostic ядро (TS-библиотека, публичный API)
-│   ├── types.ts         # Observation, Chunk, LedgerEntry, RunReport, ...
-│   ├── config.ts        # ResolvedConfig + defaults + merge
+src/
+├── core/          # agent-agnostic ядро (exports ./core; subpath ./core/testing)
+│   ├── types.ts         # Observation, Chunk, LedgerEntry, RunReport; интерфейсы
+│   │                    # ModelRunner/HistorySource/LedgerStore/EventSink/MemoryRoot
+│   ├── config.ts        # ResolvedConfig + defaults + problems (fail-loudly)
 │   ├── tokens.ts        # token estimation (fast, без LLM)
-│   ├── chunker.ts       # разбивка истории на token-bounded slices
-│   ├── ledger/          # append-only пул, watermarks, projection, render (model-free)
-│   ├── orchestrator.ts  # clocks: observer/consolidator/compaction, concurrency pool
-│   ├── memory-store.ts  # durable files: <root>/<sessionId>/<topic>.md, INDEX.md, JOURNEY.md
-│   ├── runner.ts        # интерфейс ModelRunner (execute worker run)
-│   ├── prompts/         # prompt-шаблоны observer/consolidator (agent-agnostic)
-│   └── cost.ts          # cost accounting
-├── adapters/
-│   └── pi/        # адаптер для pi-coding-agent (pi extension)
-│       ├── index.ts     # точка входа расширения: события → orchestrator
-│       ├── session.ts   # маппинг session/branch, fork-seed, appendEntry-ledger
-│       ├── runner.ts    # ModelRunner через headless subprocess pi (pi CLI)
-│       ├── commands.ts  # /om, /om:status, /om:compact, /om:consolidate
-│       └── ui.ts        # status widget / footer
-├── tests/           # vitest (core) + smoke (adapter)
-├── package.json     # workspaces или единый пакет с exports
-└── docs/
+│   ├── chunker.ts       # token-bounded slices (overlap от startIdx, не от 0 — R1)
+│   ├── orchestrator.ts  # gate, observer pump (R4: dispatch-курсор, реальный
+│   │                    # параллелизм), compaction, gap-markers (R2), status (R5-кэш),
+│   │                    # shutdown (drain + final pump — E1)
+│   ├── run-manager.ts   # LLM-run lifecycle: trackTask/runWorker, commit-retry (R3),
+│   │                    # drainInFlight (общий для shutdown/compaction), badSlices,
+│   │                    # committedForRun
+│   ├── session.ts       # createOmSession (embedded-конвейер)
+│   ├── memory-store.ts  # durable: <root>/<sessionId>/<topic>.md, INDEX.md, JOURNEY.md
+│   ├── recall.ts        # BM25-lite + детерминированный RU/EN словарь-мост
+│   ├── sanitize.ts, gap-markers.ts, cost.ts, worker-output.ts, testing.ts
+│   ├── ledger/          # pool, progress (watermarks), render (model-free),
+│   │                    # payload (единая валидация), file-store (JSONL+lock+repair)
+│   └── prompts/         # observer/consolidator/reflector/extractor
+├── adapters/pi/     # pi extension: index.ts — вайринг pi.on (124 строки) +
+│                    # boot/resume/ui/sink/commands/recall-tool; config, history,
+│                    # ledger (pi.appendEntry), runner (headless subprocess pi,
+│                    # role-таблица), scoped-tools, worker-env, worker (worker-ext)
+├── adapters/mcp/    # server.ts (stdio JSON-RPC, lazy init + кэш — A7),
+│                    # pi-ledger.ts (tail-read 25 МБ + сверка session id — A2/A3)
+├── eval/            # 8 кейсов (npm run eval, реальные воркеры через OM_PI_BIN)
+└── tests/           # vitest (367 тестов)
 ```
 
-Ключевые интерфейсы ядра (черновик):
-- `ModelRunner.run(role: 'observer'|'consolidator', input: WorkerInput): Promise<WorkerResult>`
-- `HistorySource` (getNewMessagesSince(watermark), estimateTokens)
+Ключевые интерфейсы ядра:
+- `ModelRunner.run(role: 'observer'|'consolidator'|'extractor'|'reflector', input: WorkerInput): Promise<WorkerResult>`
+- `HistorySource` (getNewMessagesSince(watermark), estimateTokens, lastTwoMessageAts — для gap-markers)
 - `EventSink` (onCompactionBlock(block), onStatusChange(...))
+- `LedgerStore` (append-only; в pi — `pi.appendEntry`, в embedded — FileLedgerStore)
 - `MemoryRoot` (storage abstraction: файлы vs DB)
+- **Контракт `shutdown()`** (E1): quiescent-drain + финальный observer pump (хвост,
+  накопленный после последнего turn_end, тоже наблюдается) + drain. Адаптеры обязаны
+  дождаться `shutdown()`/`drainForCompaction()` перед выходом/внешней компакцией.
 
 ## 6. Соглашения по работе (процесс, PMBOK/SDLC)
 
@@ -186,11 +196,51 @@ observational-memory/
    Mastra (extractors, early activation) — v2, в ядре — interface-задел (extension points). ✅
 6. **Целевой минимальный pi-релиз:** 0.86.1 (локальная установка пользователя). ✅
 
-### Справка: temporal gap markers (перенесено в v1)
+### Справка: temporal gap markers (в v1; механизм актуален с v0.6, R2/R9)
 Фича Mastra: при возобновлении диалога после паузы ≥ N минут (по умолч. 10) вставляется
 метка «прошло X времени с прошлого сообщения», сохраняется в памяти и видна observer'у —
-наблюдения можно якорить во времени («решение принято после 2-дневной паузы»). Для pi:
-актуально при возобновлении сессии через день/неделю.
+наблюдения можно якорить во времени («решение принято после 2-дневной паузы»). Механизм:
+пауза меряется между предпоследним и последним сообщениями ветки
+(`HistorySource.lastTwoMessageAts`, R2 — НЕ длительность завершившегося run'а);
+dedup персистентен: `prevAt` хранится в записи `om.gap-marker`, переживает рестарт хоста (R9).
+
+### Принято (2026-09, волны 1–6, релизы v0.6.0/v0.7.0)
+7. **Shutdown-контракт (E1):** `shutdown()` = quiescent-drain + финальный observer pump
+   (хвост после последнего turn_end наблюдается) + drain. `session_before_compact` — async,
+   ждёт `drainForCompaction()` (A5). Адаптеры обязаны ожидать drain перед выходом/внешней
+   компакцией. ✅
+8. **Версионирование ledger = absence (S3/D1):** `core/ledger/serialize.ts` (envelope
+   v/data) удалён — миграции ручные; единая валидация payload в `core/ledger/payload.ts`
+   (pi/ledger, file-store, mcp). ✅
+9. **`topKBudgetTokens` удалён (S7):** единственный кап блока — `maxCompactBlockTokens`
+   (на оба режима `compaction.inject`: full|topK). ✅
+10. **Наблюдения = язык среза (волна 4):** промпт observer — «язык вывода = доминирующий
+    язык слайса, идентификаторы/пути/значения verbatim»; P0-кап: explicit-remember —
+    всегда [P0] и вне капа 2–3; pending/blocking states — факты; секреты (token-shaped) —
+    никогда. Consolidator — idempotency + supersede без выдуманных дат; reflector —
+    no-op-протокол, merge verbatim; extractor — пул с датами `[id] (YYYY-MM-DD)`
+    (asOf детерминирован). ✅
+11. **Recall RU/EN (волна 4):** детерминированный двуязычный словарь-мост (BRIDGE)
+    в tokenize (query+doc) — model-free, без stemming/транслита. ✅
+12. **R4: observerConcurrency — реальный параллелизм (v0.7.0):** dispatch-курсор
+    `dispatchedUpToId` (в памяти, НЕ персистится; никогда не назад от committed watermark);
+    за pump диспатчится до k срезов. worker-failure → срез пропущен (badSlices,
+    re-observe в следующем цикле); commit-failure → откат курсора + re-observe (без дублей —
+    committed-history не re-observe'ится). **Committed-watermark — истина** для пула/рендера.
+    ✅
+13. **R5: status()-кэш + O(1) maxSeq (v0.7.0):** `seqBySecond` в памяти (rebuild при
+    старте из ledger); status не пересчитывает всё на каждый append (кроме
+    `unobservedTokens` — см. открытые вопросы). ✅
+14. **A7: MCP — ленивый init + кэш (v0.7.0):** один `initState` per source;
+    инвалидация: env-изменение, mtime/size источника, удаление файла, новая client-сессия. ✅
+
+### Открытые вопросы / известный остаток (v0.7.0)
+- R10: двойная `orderByPriority` (`trimToBudget` + `compactionPlan`) — микрос, чинено (6963499, волна 6).
+- `status().unobservedTokens` не кэширован (R5 частичный) — осознанно, без правки адаптеров.
+- 2 failed-факта в live eval — варьативность модели; eval-кейсы их фиксируют
+  (не баг пайплайна).
+- Ручные smoke-остатки из v0.5.x: auto-compact в print-режиме (isIdle suspect),
+  /tree-ветвление, gap-markers/reflect в штатном режиме (паузы ≥ 10 мин).
 
 ## 8. Статус
 
@@ -470,3 +520,74 @@ observational-memory/
   `git:github.com/stelmakhdigital/observational-memory@v0.2.0` (settings.json,
   pi поставит пакет при следующем старте). Локальная разработка теперь требует
   `pi update --extensions` / сдвиг тега для прогона изменений.
+- 2026-09: **v0.5.2–v0.5.4 (hotfix-волна)**: live-находки TUI — guard ALL ui-вызовов
+  (notify/setStatus; hasUI=true при деградировавшем ctx.ui — /om:status крашился;
+  report() → console fallback + одноразовый stderr-диагностик); diagnostic log при
+  пропуске auto-compact (not idle на agent_end). 292 теста.
+- 2026-09: **refactoring-analysis.md (5f16ff2)** — 4 параллельных deep-ревью
+  (core/adapters/кросс-срез/eval+промпты) + live `npm run eval`: 28 новых багов
+  (R/A/E), ~15 позиций dead code (вкл. `core/ledger/serialize.ts` целиком),
+  структурные задачи (orchestrator 1012 строк → RunManager; adapter index 511 → 6
+  модулей; role-таблица runner), план 5 волн. Баги P0/P1/P2 из audit.md (26.09)
+  не дублируются.
+- 2026-09: **Волна 1 (прода-баги)**: R1 — chunker overlap больше не разрастается на
+  всю историю (`begin = startIdx`); **E1 — финальный observer pump при graceful stop**
+  (shutdown = drain + донаблюдение хвоста + drain; **контракт shutdown изменён для
+  адаптеров**); R2 — gap-markers меряют реальную пользовательскую паузу между двумя
+  последними сообщениями (`lastTwoMessageAts`), не длительность run'а; A1 — сброс
+  Runtime при `session_shutdown` reason new/resume/fork (/new //resume в том же
+  процессе); A4 — drain-watchdog: `killTree` + `unref` (нет призрачного воркера,
+  дожигающего LLM после выхода хоста); A2 — MCP tail-read 25 МБ (не head);
+  A3 — сверка session id (`OM_MCP_SESSION`); A14 — short-read цикл readSync. 313 тестов.
+- 2026-09: **Волна 2 (тихие баги и данные)**: R3 — idempotent commit-retry после
+  partial commit (позиция+текст, без дублей); R6 — sumCosts skip неизвестных role;
+  R7 — невалидные recall since/until → OmError (не тихий NaN); R8 — seed-флаг после
+  успеха; R9 — gap-dedup переживает рестарт (prevAt в маркере); A5 — async
+  `session_before_compact` + `drainForCompaction`; A6 — settings whitelist с
+  fail-loudly problems; A8 — timeout: снятие close/error-слушателей; A9 — капы
+  stdout 2 МБ / stderr 4 КБ; A11 — MCP: no responses на notifications + ping;
+  A12 — валидация /om:recall limit/dates; A13 — tail-first indexAfter; A15 —
+  readCapped (bytes-aware); A16 — один ledger.read в om_status. 346 тестов.
+- 2026-09: **Волна 3 (структура, behavior 1:1)**: `RunManager` вынесен в
+  `core/run-manager.ts` (run lifecycle + общий drainInFlight); единая
+  payload-валидация `core/ledger/payload.ts`, **`serialize.ts` УДАЛЁН**
+  (версионирование = absence, миграции ручные); **`topKBudgetTokens` УБРАН**
+  (`maxCompactBlockTokens` — оба режима inject); `core/testing` → subpath
+  `./core/testing`; **adapter index.ts 546→124** (6 модулей: boot/resume/ui/sink/
+  commands/recall-tool); role-таблица runner (prompt/model/parse); walkDir +
+  grepFile; worker-env константы; dead code D2–D15 (~15 позиций) очищен; тест-
+  фикстуры в `tests/fixtures/mocks.ts`. 345 тестов.
+- 2026-09: **Волна 4 (качество состава)**: промпты — язык наблюдений = язык среза
+  (RU/EN), P0-кап (explicit-remember вне капа), pending-states как факты, P1
+  preference, секреты; consolidator — idempotency + supersede без выдуманных дат;
+  reflector — no-op-протокол/verbatim; extractor — пул с датами (asOf детерминирован);
+  **recall — детерминированный RU/EN словарь-мост BRIDGE в tokenize (model-free)**. 356 тестов.
+- 2026-09: **Волна 5 (docs)**: синхронизация README/ARCHITECTURE (§10.13)/REQUIREMENTS
+  к v0.6 (layout, 4 роли, 9 команд + om_recall tool, caps, M4/M5). **Релиз v0.6.0**
+  (822b023): волны 1–3 (22 бага) + волна 4 + eval-расширение: 3 regression-кейса
+  (gap-markers via lastTwoMessageAts, cross-lingual recallSearch через RU/EN мост,
+  детерминированный tail-race — доказывает финальный pump) + wallMs/chunkCount/
+  observedTokens-метрики. Live: 8 кейсов — survival 0.97, poison 0, recall 2/2.
+- 2026-09: **Волна 6 + релиз v0.7.0 (051fff2, HEAD 487eb0f)**: R4 — реальный
+  observer-параллелизм (dispatchedUpToId — dispatch-курсор в памяти, не персистится;
+  worker-failure → skip среза (badSlices), commit-failure → откат курсора +
+  re-observe; committed-watermark — истина для рендера/пула); R5 — status()-кэш +
+  O(1) maxSeq (seqBySecond в памяти, rebuild при старте); A7 — MCP ленивый init +
+  кэш (инвалидация: env/mtime/size/удаление файла/новая сессия). 367 тестов, typecheck чисто.
+  Остаток: status().unobservedTokens не
+  кэширован (без правки адаптеров), 2 eval failed-факта = варьативность модели
+  (кейсы их фиксируют).
+- 2026-09: **Live-аудит v0.7.0 + 3 фикса (29.09)**: полная проверка (статика, live smoke
+  pi 0.87.1 headless, MCP stdio, eval: survival 0.99, poison 0, recall 2/2). Фиксы:
+  (1) `/om <неизвестное слово>` молча TOGGLE'ил gate (live-ловушка: `/om status`
+  отключал OM) → usage-подсказка, состояние не меняется (bare /om = toggle сохранён);
+  (2) messageText не считал аргументы tool-вызовов → tool-heavy сессии наблюдались
+  поздно (0 наблюдений за 6-мин сессию: посчитано ~534 токена при ~31k реальных)
+  → аргументы включены (кап 2000 символов на вызов, unserializable → placeholder);
+  (3) **auto-compact в print-режиме не работал** (isIdle()=false на agent_end —
+  подтверждено живым diag-логом «not idle at agent_end (tokens 31803)») →
+  `orch.onSettled()` по pi-событию `agent_settled` (retry того же compaction-check;
+  в print-режиме settled — единственный момент, когда isIdle=true). Live-верификация:
+  agent_end skipped → settled → «compaction block emitted (3561 chars)». 373 теста.
+  Headless-паттерн в README: `pi -p "/om on" "задача"` (два positional; один
+  мультистрочный промпт не шлёт задачу — extension-команда глотает текст, поведение pi).

@@ -138,6 +138,12 @@ import { createOmSession } from '@stelmakhdigital/observational-memory/core';
 старый факт/решение, которого нет в видимом контексте, он сам вызывает тул
 `om_recall` (или пользователь — `/om:recall`).
 
+Headless (print-режим, pi 0.87.x): `/om on` и задача — **раздельными
+позиционными аргументами**: `pi -p "/om on" "задача..."`. Один мультистрочный
+промпт `/om on\n<задача>` не шлёт задачу модели — extension-команда глотает
+весь текст. Неизвестный аргумент `/om` (напр. `/om status`) ничего не
+переключает — показывает usage; статус — в `/om:status`.
+
 ## Конфигурация
 
 Неймспейс `observational-memory` в `~/.pi/agent/settings.json` (global) и
