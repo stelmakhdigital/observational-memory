@@ -73,6 +73,41 @@ describe('messageText', () => {
       '[tool result: bash] ok',
     );
   });
+
+  it('includes capped tool call args (tool-heavy sessions must count their tokens)', () => {
+    const t = messageText({
+      role: 'assistant',
+      content: [{ type: 'toolCall', name: 'write', arguments: { path: 'a.ts', content: 'code-line' } }],
+    } as never);
+    expect(t).toContain('[tool: write]');
+    expect(t).toContain('"path":"a.ts"');
+    expect(t).toContain('code-line');
+
+    // string args pass through as-is
+    const ts = messageText({
+      role: 'assistant',
+      content: [{ type: 'toolCall', name: 'bash', arguments: 'ls -la' }],
+    } as never);
+    expect(ts).toContain('[tool: bash] ls -la');
+
+    // over-cap args are truncated, not dropped
+    const big = 'x'.repeat(5000);
+    const tb = messageText({
+      role: 'assistant',
+      content: [{ type: 'toolCall', name: 'write', arguments: { content: big } }],
+    } as never);
+    expect(tb).toContain('…[truncated]');
+    expect(tb.length).toBeLessThan(2300);
+
+    // unserializable args degrade to a placeholder
+    const cyc: Record<string, unknown> = {};
+    cyc.self = cyc;
+    const tc = messageText({
+      role: 'assistant',
+      content: [{ type: 'toolCall', name: 'x', arguments: cyc }],
+    } as never);
+    expect(tc).toContain('[unserializable args]');
+  });
 });
 
 describe('PiHistorySource', () => {

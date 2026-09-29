@@ -78,7 +78,7 @@ export function messageText(
         .map((p) => {
           if (typeof p === 'string') return p;
           if (p && typeof p === 'object') {
-            const part = p as { type?: string; text?: string; name?: string; label?: string; filename?: string };
+            const part = p as { type?: string; text?: string; name?: string; label?: string; filename?: string; arguments?: unknown };
             if (part.type === 'text' && typeof part.text === 'string') return part.text;
             if (part.type === 'image') {
               if (attachments === 'off') return '';
@@ -90,7 +90,21 @@ export function messageText(
               const nm = part.name ?? part.label ?? part.filename;
               return nm ? `[file: ${nm}]` : '[file]';
             }
-            if (part.type === 'toolCall' && part.name) return `[tool: ${part.name}]`;
+            if (part.type === 'toolCall' && part.name) {
+              // Include (capped) args: tool-heavy sessions keep most of their
+              // tokens in tool calls — without them unobservedTokens
+              // underestimates context and observers trigger too late.
+              let argTxt = '';
+              if (part.arguments !== undefined) {
+                try {
+                  argTxt = typeof part.arguments === 'string' ? part.arguments : JSON.stringify(part.arguments);
+                } catch {
+                  argTxt = '[unserializable args]';
+                }
+                if (argTxt.length > 2000) argTxt = `${argTxt.slice(0, 2000)}…[truncated]`;
+              }
+              return `[tool: ${part.name}] ${argTxt}`.trim();
+            }
           }
           return '';
         })
