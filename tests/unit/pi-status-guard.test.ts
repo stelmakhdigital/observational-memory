@@ -3,7 +3,7 @@
  * interactive mode). The status line is decorative — a missing method must
  * never break the pipeline (commands, compaction, workers).
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -79,5 +79,30 @@ describe('ui without setStatus (TUI boot-ctx regression)', () => {
     await env.handlers.get('session_start')!(undefined, env.ctx);
     await expect(env.commands.get('om')!.handler('on', env.ctx)).resolves.toBeUndefined();
     await expect(env.commands.get('om:status')!.handler('', env.ctx)).resolves.toBeUndefined();
+  });
+});
+
+describe('/om argument handling', () => {
+  it('unknown arg does NOT toggle the gate; bare /om still toggles', async () => {
+    const env = makeEnv();
+    await env.handlers.get('session_start')!(undefined, env.ctx);
+    await env.commands.get('om')!.handler('on', env.ctx);
+    let logged = '';
+    const spy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
+      logged += a.join(' ') + '\n';
+    });
+    try {
+      // The live smoke trap: `/om status` (typo for /om:status) must be a no-op.
+      await env.commands.get('om')!.handler('status', env.ctx);
+      await env.commands.get('om:status')!.handler('', env.ctx);
+      expect(logged).toContain('Unknown /om arg');
+      expect(logged).toContain('OM on'); // still on — not silently disabled
+      // Bare /om keeps the toggle behavior.
+      await env.commands.get('om')!.handler('', env.ctx);
+      await env.commands.get('om:status')!.handler('', env.ctx);
+      expect(logged).toContain('OM off');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

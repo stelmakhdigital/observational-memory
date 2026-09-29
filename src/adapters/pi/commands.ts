@@ -28,7 +28,13 @@ export function registerCommands(pi: PiApi, deps: CommandDeps): void {
       const t = args.trim().toLowerCase();
       if (t === 'on') r.orch.setEnabled(true);
       else if (t === 'off') r.orch.setEnabled(false);
-      else r.orch.setEnabled(!r.orch.isEnabled());
+      else if (t === '') r.orch.setEnabled(!r.orch.isEnabled());
+      else {
+        // Unknown arg: do NOT toggle (a typo like `/om status` must not
+        // silently flip the gate) — usage hint instead.
+        report(ctx, ['Unknown /om arg. Use: /om on | /om off | /om (toggle) | /om:status'], ui);
+        return;
+      }
       report(ctx, [r.orch.isEnabled() ? 'Observational memory: ON' : 'Observational memory: OFF'], ui);
     },
   });
