@@ -84,6 +84,11 @@ export default function observationalMemory(pi: PiApi): OmExtension {
       runUnfinished: runEndedUnfinished((e as { messages?: unknown })?.messages),
     });
   });
+  // pi's isIdle() is still false at agent_end (the run counts as active until
+  // settlement) — re-check auto-compaction once the run is fully settled.
+  pi.on('agent_settled', async (_e, ctx) => {
+    await track(ctx).orch.onSettled();
+  });
   pi.on('model_select', (_e, ctx) => {
     // Early activation (v2): the prompt cache is invalidated anyway.
     track(ctx).orch.onModelChange();

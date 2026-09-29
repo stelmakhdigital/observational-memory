@@ -204,6 +204,22 @@ describe('compaction (FR-3)', () => {
     await orch.onAgentEnd();
     expect(sink.blocks.length).toBe(1);
   });
+
+  it('retries auto-compaction at onSettled when not idle at agent_end (print mode)', async () => {
+    // pi's isIdle() is still false at agent_end in print mode — the run only
+    // settles afterwards. Without the onSettled retry auto-compaction never
+    // fired there (live smoke 29.09: "not idle at agent_end (tokens 31803)").
+    orch.setEnabled(true);
+    history.contextTokens = 150; // ≥ compactAtContextTokens (100)
+    history.idle = false;
+    await orch.onAgentEnd();
+    expect(sink.blocks.length).toBe(0); // skipped: not idle
+    history.idle = true; // agent_settled: run no longer active
+    await orch.onSettled();
+    expect(sink.blocks.length).toBe(1); // retried and compacted
+    await orch.onSettled();
+    expect(sink.blocks.length).toBe(1); // no double compaction
+  });
 });
 
 describe('gap markers (FR-8, R2: pause between messages, not run duration)', () => {

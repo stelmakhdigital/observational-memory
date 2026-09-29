@@ -307,6 +307,21 @@ export class OmOrchestrator {
     this.lastRunUnfinished = !!opts?.runUnfinished;
     this.maybeMarkGap();
     this.scheduleReflectIdleCheck();
+    await this.tryAutoCompaction();
+  }
+
+  /**
+   * Re-check auto-compaction once the run is fully settled (pi: agent_settled).
+   * pi's isIdle() is still false at agent_end (the run counts as active until
+   * settlement), so in print mode the onAgentEnd check is always skipped —
+   * without this retry auto-compaction never fires there.
+   */
+  async onSettled(): Promise<void> {
+    if (!this.enabled || this.cfg.passive) return;
+    await this.tryAutoCompaction();
+  }
+
+  private async tryAutoCompaction(): Promise<void> {
     const tokens = this.d.history.currentTokens();
     if (tokens >= this.cfg.compactAtContextTokens && tokens > this.compactedForTokens) {
       if (this.d.history.isIdle()) {

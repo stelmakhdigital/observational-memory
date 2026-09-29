@@ -42,7 +42,7 @@ describe('pi adapter entry (smoke)', () => {
   it('registers the expected event handlers and commands', () => {
     const { pi, handlers, commands, tools } = makePi();
     ext(pi);
-    for (const ev of ['session_start', 'turn_end', 'agent_end', 'session_before_compact', 'session_shutdown']) {
+    for (const ev of ['session_start', 'turn_end', 'agent_end', 'agent_settled', 'session_before_compact', 'session_shutdown']) {
       expect(handlers.has(ev), `handler ${ev}`).toBe(true);
     }
     for (const cmd of ['om', 'om:status', 'om:compact', 'om:consolidate', 'om:extract', 'om:recall', 'om:reflect', 'om:seed-from']) {
