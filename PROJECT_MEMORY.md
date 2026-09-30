@@ -591,3 +591,15 @@ dedup персистентен: `prevAt` хранится в записи `om.ga
   agent_end skipped → settled → «compaction block emitted (3561 chars)». 373 теста.
   Headless-паттерн в README: `pi -p "/om on" "задача"` (два positional; один
   мультистрочный промпт не шлёт задачу — extension-команда глотает текст, поведение pi).
+- 2026-09: **Fix install на новом ПК (30.09): typebox peer → dependency**: `pi update
+  --extensions` на чистой машине падал: pi ставит git-пакеты через
+  `npm install --omit=dev --legacy-peer-deps` → peer-зависимости НЕ авто-ставятся
+  (допущение v0.5.1 «чистый peer `*` авто-ставится npm 7+» верно только БЕЗ
+  --legacy-peer-deps — pi добавил флаг) → `prepare` → tsc: TS2307 Cannot find module
+  'typebox'. На старой машине не падало: node_modules уже имел typebox от dev-инсталла.
+  Фикс: typebox → dependencies `^1.3.34` (это runtime-значение — TypeBox-билдер
+  схем тулов, не только типы), из peerDependencies убран. Live-проверено:
+  rm -rf node_modules → `npm install --omit=dev --legacy-peer-deps` → prepare →
+  tsc → dist, 0 ошибок. packaging.test.ts: 2 инварианта обновлены (deps = ровно
+  [@types/node, typescript, typebox]; typebox не peer). README-блок установки
+  синхронизирован.

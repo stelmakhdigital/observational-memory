@@ -18,13 +18,13 @@ describe('pi package packaging (git install)', () => {
     expect(pkg.keywords).toContain('pi-package');
   });
 
-  it('lists typebox as peerDependency "*" (pi bundles it; must not be a dependency)', () => {
-    expect(pkg.peerDependencies?.typebox).toBe('*');
-    expect(pkg.dependencies?.typebox).toBeUndefined();
+  it('has typebox in dependencies (runtime value; pi update installs --omit=dev --legacy-peer-deps, so a pure peer would not be installed and prepare/tsc would fail)', () => {
+    expect(pkg.dependencies?.typebox).toBeTruthy();
+    expect(pkg.peerDependencies?.typebox).toBeUndefined();
   });
 
-  it('only build-time tooling in dependencies (prepare/build needs tsc + node types under npm install --omit=dev)', () => {
-    expect(Object.keys(pkg.dependencies ?? {}).sort()).toEqual(['@types/node', 'typescript']);
+  it('only build-time tooling + typebox in dependencies (prepare/build needs tsc + node types + typebox under npm install --omit=dev --legacy-peer-deps)', () => {
+    expect(Object.keys(pkg.dependencies ?? {}).sort()).toEqual(['@types/node', 'typebox', 'typescript']);
   });
 });
 

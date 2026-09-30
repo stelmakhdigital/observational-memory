@@ -44,10 +44,8 @@
     "eval": "npm run build:scripts && node dist-scripts/eval/run.js",
     "mcp": "npm run build && node dist/adapters/mcp/server.js"
   },
-  "peerDependencies": {
-    "typebox": "*"
-  },
   "dependencies": {
+    "typebox": "^1.3.34",
     "@types/node": "^20.14.0",
     "typescript": "^5.5.0"
   },
